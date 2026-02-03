@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -22,6 +22,31 @@ import {
 import ProvisioningComplete from '@/components/ProvisioningComplete'
 
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardSkeleton />}>
+      <DashboardContent />
+    </Suspense>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+      <div className="animate-pulse">
+        <div className="h-8 bg-[#1f1f28] rounded w-48 mb-2" />
+        <div className="h-4 bg-[#1f1f28] rounded w-64 mb-8" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-32 bg-[#1f1f28] rounded-2xl" />
+          ))}
+        </div>
+        <div className="h-96 bg-[#1f1f28] rounded-2xl" />
+      </div>
+    </div>
+  )
+}
+
+function DashboardContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [showProvisioned, setShowProvisioned] = useState(false)
