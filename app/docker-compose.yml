@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  devflow-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devflow-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://your-project.supabase.co}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-your-anon-key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-your-api-key}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-your-stripe-key}
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    restart: unless-stopped
+    networks:
+      - devflow-network
+
+networks:
+  devflow-network:
+    driver: bridge

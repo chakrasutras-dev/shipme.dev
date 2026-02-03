@@ -1,0 +1,20 @@
+{
+  "name": "devflow-automation-agent",
+  "version": "2.0.0",
+  "description": "Claude Computer Use automation agent for DevFlow",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "./start.sh",
+    "dev": "NODE_ENV=development node --watch index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "ioredis": "^5.3.2",
+    "postgres": "^3.4.3",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
