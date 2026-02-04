@@ -3,8 +3,16 @@
  * Generates comprehensive INFRASTRUCTURE.md documentation
  */
 
-import { StackSelection } from '@/components/ServiceConnector'
 import { ProvisioningResult } from './types'
+
+// Local type definition (ServiceConnector removed in v2.0)
+interface StackSelection {
+  infrastructure?: string
+  source_control?: string
+  hosting?: string
+  database?: string
+  [key: string]: any
+}
 
 interface ServiceSpec {
   name: string
@@ -526,9 +534,9 @@ export function generateInfrastructureSpec(
   result: ProvisioningResult
 ): string {
   const services: ServiceSpec[] = [
-    SERVICE_SPECS[stack.source_control],
-    SERVICE_SPECS[stack.hosting],
-    SERVICE_SPECS[stack.database],
+    stack.source_control ? SERVICE_SPECS[stack.source_control as keyof typeof SERVICE_SPECS] : undefined,
+    stack.hosting ? SERVICE_SPECS[stack.hosting as keyof typeof SERVICE_SPECS] : undefined,
+    stack.database ? SERVICE_SPECS[stack.database as keyof typeof SERVICE_SPECS] : undefined,
     SERVICE_SPECS.codespaces,
   ].filter((s): s is ServiceSpec => s !== undefined)
 
