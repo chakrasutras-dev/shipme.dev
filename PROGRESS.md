@@ -6,31 +6,32 @@
 
 ---
 
-## Phase 0: Backup & Preparation ⏳
-**Status:** Starting now
+## Phase 0: Backup & Preparation ✅
+**Status:** COMPLETED
 **Goal:** Preserve v1.0 and prepare repository
 
 ### Tasks
-- [ ] Create `v1.0-archive` branch
-- [ ] Document current state (screenshots, env vars, routes)
-- [ ] Create `v2.0-development` branch
-- [ ] Push branches to remote
+- [x] Create `v1.0-archive` branch
+- [x] Document current state (screenshots, env vars, routes)
+- [x] Create `v2.0-development` branch
+- [x] Push branches to remote
 
 ---
 
-## Phase 1: Foundation + Simplified Landing 📋
-**Status:** Pending
+## Phase 1: Foundation + Simplified Landing ⏳
+**Status:** IN PROGRESS - Code Complete, Ready for Deployment
 **Goal:** Deploy simplified v2.0 landing page + auth
 
 ### Tasks
-- [ ] Remove v1.0 dashboard folders
-- [ ] Simplify `/app/src/app/page.tsx`
-- [ ] Create auth helpers (`/app/src/lib/auth/supabase-auth.ts`)
-- [ ] Create OAuth callback (`/app/src/app/auth/callback/route.ts`)
-- [ ] Update middleware for auth protection
-- [ ] Create Codespace launcher stub (`/app/src/app/api/launch-codespace/route.ts`)
-- [ ] Add v2.0 database tables to schema
-- [ ] Run database migration
+- [x] Remove v1.0 dashboard folders (`(dashboard)`, `(admin)`)
+- [x] Remove v1.0 components (StackCustomizer, ProvisioningComplete, etc.)
+- [x] Simplify `/app/src/app/page.tsx` (reduced from 900 to 300 lines)
+- [x] Create auth helpers (`/app/src/lib/auth/supabase-auth.ts`)
+- [x] Update OAuth callback (`/app/src/app/auth/callback/route.ts`)
+- [x] Update middleware for auth protection
+- [x] Create Codespace launcher stub (`/app/src/app/api/launch-codespace/route.ts`)
+- [x] Add v2.0 database tables to schema (codespace_launches, provisioning_events)
+- [ ] Run database migration (requires Supabase access)
 - [ ] Deploy to shipme.dev
 - [ ] Test: Auth flow, stub launcher, no errors
 

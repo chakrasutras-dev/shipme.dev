@@ -1,7 +1,18 @@
-import { type NextRequest } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { updateSession } from './lib/supabase/middleware'
+import { createClient } from '@/lib/supabase/server'
 
 export async function middleware(request: NextRequest) {
+  // Protect /api/launch-codespace endpoint
+  if (request.nextUrl.pathname.startsWith('/api/launch-codespace')) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
+
   return await updateSession(request)
 }
 
