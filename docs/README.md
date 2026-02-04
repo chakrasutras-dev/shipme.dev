@@ -10,6 +10,8 @@ docs/
 ├── implementation/        # Phase completion summaries
 ├── reports/              # Testing and status reports
 ├── planning/             # Progress tracking and planning docs
+├── archive/              # Legacy documentation from v1.0 and early dev
+├── SESSION-SUMMARY.md    # Latest session work summary
 └── README.md             # This file
 ```
 
@@ -26,6 +28,12 @@ docs/
 ### Reports
 - [Phase 1 Testing Report](./reports/PHASE-1-TESTING-REPORT.md) - Comprehensive Phase 1 report for team review
 - [Reports Overview](./reports/README.md) - Quick navigation for reports
+
+### Session Summaries
+- [Latest Session Summary](./SESSION-SUMMARY.md) - Most recent work completed
+
+### Archive
+- [Legacy Documentation](./archive/README.md) - v1.0 and early development docs
 
 ## 🎯 Current Status
 
@@ -56,6 +64,7 @@ Start here:
 - `/implementation/` - Phase completion summaries
 - `/reports/` - Testing reports and status updates
 - `/planning/` - Progress tracking and planning
+- `/archive/` - Legacy v1.0 and early development documentation
 
 ### Document Types
 - **Product Specs** - Vision, architecture, requirements
