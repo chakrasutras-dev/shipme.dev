@@ -1,0 +1,14 @@
+{
+  "$schema": "./project-schema.json",
+  "name": "{{PROJECT_NAME}}",
+  "description": "{{PROJECT_DESCRIPTION}}",
+  "stack": {
+    "framework": "{{FRAMEWORK}}",
+    "database": "{{DATABASE}}",
+    "hosting": "{{HOSTING}}",
+    "auth": []
+  },
+  "createdAt": "{{CREATED_AT}}",
+  "createdBy": "shipme.dev",
+  "version": "2.0.0"
+}

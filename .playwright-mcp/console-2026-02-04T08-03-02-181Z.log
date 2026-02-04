@@ -1,0 +1,44 @@
+[  107391ms] [ERROR] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} segmentPath={[...]} ...>
+            <SegmentViewNode type="page" pagePath="page.tsx">
+              <SegmentTrieNode>
+              <ClientPageRoot Component={function LandingPage} serverProvidedParams={{...}}>
+                <LandingPage params={Promise} searchParams={Promise}>
+                  <div className="min-h-scre...">
+                    <nav>
+                    <section className="relative p...">
+                      <div className="max-w-4xl ...">
+                        <div>
+                        <div className="relative">
+                          <div>
+                          <h1>
+                          <p>
+                          <div className="max-w-2xl ...">
+                            <div className="relative">
+                              <textarea
+                                value=""
+                                onChange={function onChange}
+                                placeholder={"Describe your app idea... (e.g., 'A SaaS for pet health tracking with p..."}
+                                className="w-full h-32 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl text-wh..."
+-                               style={{caret-color:"transparent"}}
+                              >
+                            ...
+                    ...
+            ...
+          ...
+ @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_f3530cac._.js:3127

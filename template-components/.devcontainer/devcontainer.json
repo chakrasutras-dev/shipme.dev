@@ -1,0 +1,46 @@
+{
+  "name": "ShipMe Development Environment",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
+      ],
+      "settings": {
+        "mcp.servers": {
+          "github": {
+            "command": "node",
+            "args": ["mcp-servers/github/index.js"],
+            "env": {
+              "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+            }
+          }
+        },
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      }
+    }
+  },
+
+  "forwardPorts": [3000, 54321],
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "remoteUser": "node",
+
+  "secrets": {
+    "GITHUB_TOKEN": {
+      "description": "GitHub Personal Access Token for repository operations",
+      "documentationUrl": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token"
+    }
+  }
+}
