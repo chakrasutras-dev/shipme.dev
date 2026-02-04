@@ -1,0 +1,52 @@
+[   10757ms] [ERROR] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} segmentPath={[...]} ...>
+            <SegmentViewNode type="page" pagePath="page.tsx">
+              <SegmentTrieNode>
+              <ClientPageRoot Component={function LandingPage} serverProvidedParams={{...}}>
+                <LandingPage params={Promise} searchParams={Promise}>
+                  <div className="min-h-scre...">
+                    <nav>
+                    <section className="relative p...">
+                      <div className="max-w-4xl ...">
+                        <div>
+                        <div className="relative">
+                          <div>
+                          <h1>
+                          <p>
+                          <div className="max-w-2xl ...">
+                            <div className="relative">
+                              <textarea
+                                value=""
+                                onChange={function onChange}
+                                placeholder={"Describe your app idea... (e.g., 'A SaaS for pet health tracking with p..."}
+                                className="w-full h-32 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl text-wh..."
+-                               style={{caret-color:"transparent"}}
+                              >
+                            ...
+                    ...
+            ...
+          ...
+ @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_f3530cac._.js:3127
+[  174474ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=LlTCKHQgcnUUgdF57Qimr' failed:  @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_client_17643121._.js:10876
+[  174533ms] ChunkLoadError: Failed to load chunk /_next/static/chunks/node_modules_69cb9104._.js from module [project]/node_modules/next/dist/compiled/react-server-dom-turbopack/cjs/react-server-dom-turbopack-client.browser.development.js [app-client] (ecmascript)
+    at http://localhost:3000/_next/static/chunks/turbopack-_23a915ee._.js:656:25
+[  174736ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:3000/__nextjs_original-stack-frames:0
+[  174736ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:3000/favicon.ico:0
+[  174749ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/__nextjs_font/geist-mono-latin.woff2:0
+[  175470ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=LlTCKHQgcnUUgdF57Qimr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_client_17643121._.js:10876
+[  176472ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=LlTCKHQgcnUUgdF57Qimr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_client_17643121._.js:10876
