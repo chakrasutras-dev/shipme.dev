@@ -130,7 +130,18 @@ export default function LandingPage() {
               ) : (
                 <div className="mt-6 p-6 bg-white/5 border border-white/10 rounded-2xl text-left">
                   <h3 className="text-lg font-bold text-white mb-3 font-['Syne']">Recommended Stack</h3>
-                  <p className="text-slate-300 mb-4">{recommendedStack.recommendation}</p>
+                  <p className="text-slate-300 mb-4">{recommendedStack.recommendation?.reasoning || "Stack recommendation generated"}</p>
+                  <div className="mb-4 space-y-2">
+                    <p className="text-sm text-slate-400">
+                      <span className="text-[#00f5ff] font-semibold">Framework:</span> {recommendedStack.recommendation?.stack?.framework || "Next.js"}
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      <span className="text-[#FFD700] font-semibold">Database:</span> {recommendedStack.recommendation?.stack?.database || "Supabase"}
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      <span className="text-[#FF00FF] font-semibold">Hosting:</span> {recommendedStack.recommendation?.stack?.hosting || "Netlify"}
+                    </p>
+                  </div>
                   <button
                     onClick={handleLaunchCodespace}
                     className="w-full px-8 py-4 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] rounded-xl font-semibold text-slate-950 hover:shadow-xl hover:shadow-[#00f5ff]/30 transition-all flex items-center justify-center gap-2 group"
