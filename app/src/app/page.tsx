@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, Github, Zap, Shield, Terminal, Rocket, Sparkles } from "lucide-react";
-import { signInWithGitHub } from "@/lib/auth/supabase-auth";
+import { signInWithGitHub, getSession } from "@/lib/auth/supabase-auth";
 
 export default function LandingPage() {
   const [projectIdea, setProjectIdea] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [recommendedStack, setRecommendedStack] = useState<any>(null);
+  const [isLaunching, setIsLaunching] = useState(false);
+  const [launchResult, setLaunchResult] = useState<any>(null);
 
   const handleAnalyzeIdea = async () => {
     if (!projectIdea.trim()) return;
@@ -31,16 +33,88 @@ export default function LandingPage() {
     }
   };
 
-  const handleLaunchCodespace = async () => {
-    // First, authenticate with GitHub
-    const { error } = await signInWithGitHub();
-    if (error) {
-      console.error("GitHub auth failed:", error);
-      return;
-    }
+  // Check for pending launch after OAuth
+  useEffect(() => {
+    const checkPendingLaunch = async () => {
+      const pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+      if (pendingLaunch) {
+        const launchData = JSON.parse(pendingLaunch);
+        localStorage.removeItem('pendingCodespaceLaunch');
 
-    // After auth, the callback will redirect back and we can launch Codespace
-    // This will be implemented in Phase 2
+        // Check if user is authenticated
+        const session = await getSession();
+        if (session) {
+          await launchCodespace(launchData);
+        }
+      }
+    };
+
+    checkPendingLaunch();
+  }, []);
+
+  const launchCodespace = async (launchData: any) => {
+    setIsLaunching(true);
+    try {
+      const response = await fetch("/api/launch-codespace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(launchData),
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        setLaunchResult(result);
+        // Open Codespace in new tab
+        if (result.codespace_url) {
+          window.open(result.codespace_url, '_blank');
+        }
+      } else {
+        console.error("Launch failed:", result);
+        alert(`Failed to launch: ${result.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error("Launch error:", err);
+      alert("Failed to launch Codespace. Please try again.");
+    } finally {
+      setIsLaunching(false);
+    }
+  };
+
+  const handleLaunchCodespace = async () => {
+    setIsLaunching(true);
+
+    try {
+      // Check if user is already authenticated
+      const session = await getSession();
+
+      const launchData = {
+        projectName: projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        description: projectIdea,
+        stack: recommendedStack?.recommendation?.stack || {}
+      };
+
+      if (session) {
+        // User is authenticated, launch immediately
+        await launchCodespace(launchData);
+      } else {
+        // Save launch data and trigger OAuth
+        localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
+
+        const { error } = await signInWithGitHub();
+        if (error) {
+          console.error("GitHub auth failed:", error);
+          alert("GitHub authentication failed. Please check your Supabase GitHub OAuth configuration.");
+          localStorage.removeItem('pendingCodespaceLaunch');
+          setIsLaunching(false);
+        }
+        // After OAuth redirect, the useEffect will handle the launch
+      }
+    } catch (err) {
+      console.error("Launch error:", err);
+      alert("Failed to launch Codespace. Please try again.");
+      setIsLaunching(false);
+    }
   };
 
   return (
@@ -142,17 +216,49 @@ export default function LandingPage() {
                       <span className="text-[#FF00FF] font-semibold">Hosting:</span> {recommendedStack.recommendation?.stack?.hosting || "Netlify"}
                     </p>
                   </div>
-                  <button
-                    onClick={handleLaunchCodespace}
-                    className="w-full px-8 py-4 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] rounded-xl font-semibold text-slate-950 hover:shadow-xl hover:shadow-[#00f5ff]/30 transition-all flex items-center justify-center gap-2 group"
-                  >
-                    <Github className="w-5 h-5" />
-                    Launch Development Environment
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                  </button>
-                  <p className="text-xs text-slate-500 mt-2 text-center">
-                    Opens GitHub Codespace with Claude Code ready to provision your infrastructure
-                  </p>
+                  {!launchResult ? (
+                    <>
+                      <button
+                        onClick={handleLaunchCodespace}
+                        disabled={isLaunching}
+                        className="w-full px-8 py-4 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] rounded-xl font-semibold text-slate-950 hover:shadow-xl hover:shadow-[#00f5ff]/30 transition-all flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isLaunching ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                            Launching Codespace...
+                          </>
+                        ) : (
+                          <>
+                            <Github className="w-5 h-5" />
+                            Launch Development Environment
+                            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                          </>
+                        )}
+                      </button>
+                      <p className="text-xs text-slate-500 mt-2 text-center">
+                        Opens GitHub Codespace with Claude Code ready to provision your infrastructure
+                      </p>
+                    </>
+                  ) : (
+                    <div className="mt-4 p-4 bg-[#00f5ff]/10 border border-[#00f5ff]/30 rounded-xl">
+                      <p className="text-white font-semibold mb-2">🚀 Codespace Launched!</p>
+                      <p className="text-sm text-slate-300 mb-3">Your development environment is ready</p>
+                      <a
+                        href={launchResult.codespace_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-white text-slate-950 rounded-lg font-semibold hover:bg-slate-100 transition-all"
+                      >
+                        <Terminal className="w-5 h-5" />
+                        Open Codespace
+                        <ArrowRight className="w-4 h-4" />
+                      </a>
+                      <p className="text-xs text-slate-400 mt-2">
+                        Repository: <a href={launchResult.repo_url} target="_blank" rel="noopener noreferrer" className="text-[#00f5ff] hover:underline">{launchResult.repo_url}</a>
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
