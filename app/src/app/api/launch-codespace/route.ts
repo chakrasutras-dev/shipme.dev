@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Octokit } from '@octokit/rest'
+import { cookies } from 'next/headers'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -21,8 +22,9 @@ export async function POST(request: Request) {
       )
     }
 
-    // Get GitHub token from session (OAuth provider token)
-    const githubToken = session.provider_token
+    // Get GitHub token - first try session, then cookie
+    const cookieStore = await cookies()
+    const githubToken = session.provider_token || cookieStore.get('github_provider_token')?.value
     if (!githubToken) {
       return NextResponse.json(
         { error: 'GitHub authentication required. Please sign in again.' },
