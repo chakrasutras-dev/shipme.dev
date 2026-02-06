@@ -2,13 +2,28 @@ import { createClient } from '@/lib/supabase/client'
 
 export async function signInWithGitHub() {
   const supabase = createClient()
+
+  // Use window.location.origin as fallback for redirect URL
+  const redirectUrl = process.env.NEXT_PUBLIC_APP_URL
+    ? `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`
+    : `${window.location.origin}/auth/callback`
+
+  console.log('[Auth] Starting GitHub OAuth, redirect URL:', redirectUrl)
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      redirectTo: redirectUrl,
       scopes: 'repo read:user'
     }
   })
+
+  console.log('[Auth] OAuth response:', { data, error })
+
+  if (error) {
+    console.error('[Auth] OAuth error:', error)
+  }
+
   return { data, error }
 }
 
