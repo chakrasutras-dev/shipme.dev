@@ -6,6 +6,7 @@ import { signInWithGitHub, getSession } from "@/lib/auth/supabase-auth";
 
 export default function LandingPage() {
   const [projectIdea, setProjectIdea] = useState("");
+  const [repoName, setRepoName] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [recommendedStack, setRecommendedStack] = useState<any>(null);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -36,15 +37,32 @@ export default function LandingPage() {
   // Check for pending launch after OAuth
   useEffect(() => {
     const checkPendingLaunch = async () => {
-      const pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
-      if (pendingLaunch) {
-        const launchData = JSON.parse(pendingLaunch);
-        localStorage.removeItem('pendingCodespaceLaunch');
+      // Check if we're returning from OAuth
+      const urlParams = new URLSearchParams(window.location.search);
+      const shouldLaunch = urlParams.get('launch') === 'pending';
 
-        // Check if user is authenticated
-        const session = await getSession();
-        if (session) {
-          await launchCodespace(launchData);
+      if (shouldLaunch) {
+        // Remove launch parameter from URL
+        window.history.replaceState({}, '', '/');
+
+        const pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+        if (pendingLaunch) {
+          const launchData = JSON.parse(pendingLaunch);
+          localStorage.removeItem('pendingCodespaceLaunch');
+
+          // Check if user is authenticated
+          const session = await getSession();
+          if (session) {
+            await launchCodespace(launchData);
+          } else {
+            // Session not ready yet, retry after a short delay
+            setTimeout(async () => {
+              const retrySession = await getSession();
+              if (retrySession) {
+                await launchCodespace(launchData);
+              }
+            }, 1000);
+          }
         }
       }
     };
@@ -88,8 +106,13 @@ export default function LandingPage() {
       // Check if user is already authenticated
       const session = await getSession();
 
+      // Use provided repo name or generate from project idea
+      const finalRepoName = repoName.trim()
+        ? repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-')
+        : projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
       const launchData = {
-        projectName: projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        projectName: finalRepoName,
         description: projectIdea,
         stack: recommendedStack?.recommendation?.stack || {}
       };
@@ -218,6 +241,22 @@ export default function LandingPage() {
                   </div>
                   {!launchResult ? (
                     <>
+                      <div className="mb-4">
+                        <label htmlFor="repoName" className="block text-sm font-medium text-slate-300 mb-2">
+                          Repository Name (optional)
+                        </label>
+                        <input
+                          id="repoName"
+                          type="text"
+                          value={repoName}
+                          onChange={(e) => setRepoName(e.target.value)}
+                          placeholder="my-awesome-app"
+                          className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[#00f5ff]/50"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                          Leave empty to auto-generate from your project description
+                        </p>
+                      </div>
                       <button
                         onClick={handleLaunchCodespace}
                         disabled={isLaunching}
