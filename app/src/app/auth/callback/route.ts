@@ -1,6 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
@@ -14,38 +13,63 @@ export async function GET(request: Request) {
     origin
   })
 
+  // Build the redirect URL first
+  let redirectPath = `/?launch=pending`
+  if (launchToken) {
+    redirectPath += `&launch_token=${launchToken}`
+  }
+
+  const redirectUrl = new URL(redirectPath, origin)
+
+  // Create the redirect response FIRST so we can set cookies on it
+  const response = NextResponse.redirect(redirectUrl)
+
   if (code) {
-    const supabase = await createClient()
+    // Create a Supabase client that sets cookies directly on the redirect response
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.headers.get('cookie')
+              ? request.headers.get('cookie')!.split('; ').map(c => {
+                  const [name, ...rest] = c.split('=')
+                  return { name, value: rest.join('=') }
+                })
+              : []
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, options)
+            })
+          },
+        },
+      }
+    )
+
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
-    // Capture the provider token from the OAuth response
-    // This is only available immediately after code exchange
+    if (error) {
+      console.error('[Callback] OAuth exchange error:', error)
+      return NextResponse.redirect(new URL(`/?error=auth_failed`, origin))
+    }
+
+    console.log('[Callback] Session established, user:', data?.session?.user?.email)
+
+    // Store the GitHub provider token if available
     if (data?.session?.provider_token) {
-      const cookieStore = await cookies()
-      // Store provider token in a secure HTTP-only cookie
-      cookieStore.set('github_provider_token', data.session.provider_token, {
+      response.cookies.set('github_provider_token', data.session.provider_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7, // 7 days
+        maxAge: 60 * 60 * 24 * 7,
         path: '/'
       })
       console.log('[Callback] Stored GitHub provider token in cookie')
     }
-
-    if (error) {
-      console.error('OAuth callback error:', error)
-      return NextResponse.redirect(`${origin}/?error=auth_failed`)
-    }
   }
 
-  // URL to redirect to after sign in process completes
-  // Pass the launch token through so the frontend can retrieve the launch data
-  let redirectUrl = `${origin}/?launch=pending`
-  if (launchToken) {
-    redirectUrl += `&launch_token=${launchToken}`
-  }
-
-  console.log('[Callback] Redirecting to:', redirectUrl)
-  return NextResponse.redirect(redirectUrl)
+  console.log('[Callback] Redirecting to:', redirectUrl.toString())
+  return response
 }
