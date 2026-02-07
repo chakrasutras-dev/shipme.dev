@@ -5,10 +5,12 @@ import { cookies } from 'next/headers'
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
+  const launchToken = requestUrl.searchParams.get('launch_token')
   const origin = requestUrl.origin
 
   console.log('[Callback] Processing OAuth callback', {
     hasCode: !!code,
+    hasLaunchToken: !!launchToken,
     origin
   })
 
@@ -38,9 +40,11 @@ export async function GET(request: Request) {
   }
 
   // URL to redirect to after sign in process completes
-  // Add launch=pending parameter to trigger launch resumption
-  // Launch data is stored on server, so no need to pass it in URL
-  const redirectUrl = `${origin}/?launch=pending`
+  // Pass the launch token through so the frontend can retrieve the launch data
+  let redirectUrl = `${origin}/?launch=pending`
+  if (launchToken) {
+    redirectUrl += `&launch_token=${launchToken}`
+  }
 
   console.log('[Callback] Redirecting to:', redirectUrl)
   return NextResponse.redirect(redirectUrl)

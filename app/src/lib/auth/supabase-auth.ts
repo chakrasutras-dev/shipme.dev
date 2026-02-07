@@ -1,10 +1,14 @@
 import { createClient } from '@/lib/supabase/client'
 
-export async function signInWithGitHub() {
+export async function signInWithGitHub(launchToken?: string) {
   const supabase = createClient()
 
   // Always use current origin for redirect so OAuth works on preview deploys too
-  const redirectUrl = `${window.location.origin}/auth/callback`
+  // Include launch token in the redirect URL so it survives the OAuth flow
+  let redirectUrl = `${window.location.origin}/auth/callback`
+  if (launchToken) {
+    redirectUrl += `?launch_token=${launchToken}`
+  }
 
   console.log('[Auth] Starting GitHub OAuth, redirect URL:', redirectUrl)
 

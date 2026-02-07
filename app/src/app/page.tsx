@@ -53,27 +53,54 @@ export default function LandingPage() {
       }
 
       if (shouldLaunch) {
-        // Remove launch parameter from URL
-        window.history.replaceState({}, '', '/');
         setIsLaunching(true);
+
+        // Get launch token from URL if present
+        const launchToken = urlParams.get('launch_token');
+        console.log('[Launch] Launch token from URL:', launchToken);
+
+        // Remove parameters from URL
+        window.history.replaceState({}, '', '/');
 
         let launchData = null;
         let dataSource = 'none';
 
-        // PRIMARY: Try server-side storage first (most reliable for cross-origin)
-        try {
-          console.log('[Launch] Trying server-side storage...');
-          const response = await fetch('/api/pending-launch');
-          if (response.ok) {
-            const result = await response.json();
-            if (result.success && result.launchData) {
-              launchData = result.launchData;
-              dataSource = 'server';
-              console.log('[Launch] Found data in server storage');
+        // PRIMARY: Try server-side storage with token from URL
+        if (launchToken) {
+          try {
+            console.log('[Launch] Fetching from server with token:', launchToken);
+            const response = await fetch(`/api/pending-launch?token=${launchToken}`);
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success && result.launchData) {
+                launchData = result.launchData;
+                dataSource = 'server';
+                console.log('[Launch] Found data in server storage');
+              }
+            } else {
+              console.warn('[Launch] Server returned:', response.status, await response.text());
             }
+          } catch (e) {
+            console.warn('[Launch] Server storage failed:', e);
           }
-        } catch (e) {
-          console.warn('[Launch] Server storage failed:', e);
+        }
+
+        // FALLBACK: Try server-side storage without token (cookie-based)
+        if (!launchData) {
+          try {
+            console.log('[Launch] Trying server storage without token...');
+            const response = await fetch('/api/pending-launch');
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success && result.launchData) {
+                launchData = result.launchData;
+                dataSource = 'server-cookie';
+                console.log('[Launch] Found data in server storage (cookie)');
+              }
+            }
+          } catch (e) {
+            console.warn('[Launch] Server storage (cookie) failed:', e);
+          }
         }
 
         // FALLBACK 1: Try localStorage
@@ -217,8 +244,9 @@ export default function LandingPage() {
         await launchCodespace(launchData);
       } else {
         const launchDataStr = JSON.stringify(launchData);
+        let serverToken: string | null = null;
 
-        // PRIMARY: Store on server (survives cross-origin OAuth redirects)
+        // PRIMARY: Store on server and get token (survives cross-origin OAuth redirects)
         try {
           console.log('[Launch] Storing on server...');
           const response = await fetch('/api/pending-launch', {
@@ -228,7 +256,8 @@ export default function LandingPage() {
           });
           if (response.ok) {
             const result = await response.json();
-            console.log('[Launch] Stored on server with token:', result.token);
+            serverToken = result.token;
+            console.log('[Launch] Stored on server with token:', serverToken);
           } else {
             console.warn('[Launch] Server storage failed:', await response.text());
           }
@@ -246,10 +275,10 @@ export default function LandingPage() {
           console.warn('[Launch] Client-side storage failed:', e);
         }
 
-        console.log('[Launch] Starting OAuth...');
+        console.log('[Launch] Starting OAuth with token:', serverToken);
 
-        // Start OAuth (no need to pass launch data anymore - it's on the server)
-        const { error } = await signInWithGitHub();
+        // Start OAuth - pass token so it's included in the redirect URL
+        const { error } = await signInWithGitHub(serverToken || undefined);
         if (error) {
           console.error("GitHub auth failed:", error);
           alert("GitHub authentication failed. Please check your Supabase GitHub OAuth configuration.");
