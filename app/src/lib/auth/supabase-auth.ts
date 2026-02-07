@@ -22,6 +22,13 @@ export async function signInWithGitHub() {
 
   if (error) {
     console.error('[Auth] OAuth error:', error)
+    return { data, error }
+  }
+
+  // Manually redirect to the OAuth URL if provided
+  if (data?.url) {
+    console.log('[Auth] Redirecting to:', data.url)
+    window.location.href = data.url
   }
 
   return { data, error }
