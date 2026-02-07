@@ -56,12 +56,28 @@ export default function LandingPage() {
         // Remove launch parameter from URL
         window.history.replaceState({}, '', '/');
 
-        const pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+        // Try localStorage first, then cookie as fallback
+        let pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+
+        // If not in localStorage, try reading from cookie
+        if (!pendingLaunch) {
+          const cookies = document.cookie.split(';');
+          for (const cookie of cookies) {
+            const [name, value] = cookie.trim().split('=');
+            if (name === 'pendingCodespaceLaunch' && value) {
+              pendingLaunch = decodeURIComponent(value);
+              break;
+            }
+          }
+        }
+
         console.log('[Launch] Pending launch data:', pendingLaunch);
 
         if (pendingLaunch) {
           const launchData = JSON.parse(pendingLaunch);
+          // Clear both localStorage and cookie
           localStorage.removeItem('pendingCodespaceLaunch');
+          document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
 
           // Check if user is authenticated
           const session = await getSession();
@@ -146,8 +162,10 @@ export default function LandingPage() {
         // User is authenticated, launch immediately
         await launchCodespace(launchData);
       } else {
-        // Save launch data and trigger OAuth
+        // Save launch data in both localStorage AND cookie for cross-origin persistence
         localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
+        // Also save as cookie (expires in 10 minutes)
+        document.cookie = `pendingCodespaceLaunch=${encodeURIComponent(JSON.stringify(launchData))}; path=/; max-age=600; SameSite=Lax`;
 
         const { error } = await signInWithGitHub();
         if (error) {
