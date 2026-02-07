@@ -56,28 +56,74 @@ export default function LandingPage() {
         // Remove launch parameter from URL
         window.history.replaceState({}, '', '/');
 
-        // Try localStorage first, then cookie as fallback
-        let pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+        // Try multiple sources for launch data (in order of preference)
+        let pendingLaunch: string | null = null;
+        let dataSource = 'none';
 
-        // If not in localStorage, try reading from cookie
+        // 1. Try localStorage first
+        pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+        if (pendingLaunch) {
+          dataSource = 'localStorage';
+          console.log('[Launch] Found data in localStorage');
+        }
+
+        // 2. If not in localStorage, try reading from cookie
         if (!pendingLaunch) {
           const cookies = document.cookie.split(';');
           for (const cookie of cookies) {
             const [name, value] = cookie.trim().split('=');
             if (name === 'pendingCodespaceLaunch' && value) {
               pendingLaunch = decodeURIComponent(value);
+              dataSource = 'cookie';
+              console.log('[Launch] Found data in cookie');
               break;
             }
           }
         }
 
+        // 3. Try sessionStorage as another fallback
+        if (!pendingLaunch) {
+          pendingLaunch = sessionStorage.getItem('pendingCodespaceLaunch');
+          if (pendingLaunch) {
+            dataSource = 'sessionStorage';
+            console.log('[Launch] Found data in sessionStorage');
+          }
+        }
+
+        // 4. Check URL hash for encoded data (survives cross-origin redirects)
+        if (!pendingLaunch && window.location.hash) {
+          try {
+            const hashParams = new URLSearchParams(window.location.hash.slice(1));
+            const encodedData = hashParams.get('shipme_data');
+            if (encodedData) {
+              pendingLaunch = atob(encodedData);
+              dataSource = 'url_hash';
+              console.log('[Launch] Found data in URL hash');
+            }
+          } catch (e) {
+            console.warn('[Launch] Failed to parse URL hash data:', e);
+          }
+        }
+
+        console.log('[Launch] Pending launch data source:', dataSource);
         console.log('[Launch] Pending launch data:', pendingLaunch);
 
         if (pendingLaunch) {
-          const launchData = JSON.parse(pendingLaunch);
-          // Clear both localStorage and cookie
+          let launchData;
+          try {
+            launchData = JSON.parse(pendingLaunch);
+          } catch (e) {
+            console.error('[Launch] Failed to parse launch data:', e);
+            alert('Invalid launch data. Please try again.');
+            setIsLaunching(false);
+            return;
+          }
+
+          // Clear all storage
           localStorage.removeItem('pendingCodespaceLaunch');
+          sessionStorage.removeItem('pendingCodespaceLaunch');
           document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
+          window.history.replaceState({}, '', '/');
 
           // Check if user is authenticated
           const session = await getSession();
@@ -102,7 +148,8 @@ export default function LandingPage() {
             }, 1000);
           }
         } else {
-          console.warn('[Launch] No pending launch data found in localStorage');
+          console.warn('[Launch] No pending launch data found in any storage');
+          alert('Launch data was lost during authentication. This can happen on preview deploys. Please try again.');
           setIsLaunching(false);
         }
       }
@@ -162,16 +209,43 @@ export default function LandingPage() {
         // User is authenticated, launch immediately
         await launchCodespace(launchData);
       } else {
-        // Save launch data in both localStorage AND cookie for cross-origin persistence
-        localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
-        // Also save as cookie (expires in 10 minutes)
-        document.cookie = `pendingCodespaceLaunch=${encodeURIComponent(JSON.stringify(launchData))}; path=/; max-age=600; SameSite=Lax`;
+        const launchDataStr = JSON.stringify(launchData);
 
-        const { error } = await signInWithGitHub();
+        // Save launch data in MULTIPLE places for cross-origin persistence
+        // 1. localStorage (same-origin only)
+        try {
+          localStorage.setItem('pendingCodespaceLaunch', launchDataStr);
+          console.log('[Launch] Saved to localStorage');
+        } catch (e) {
+          console.warn('[Launch] Failed to save to localStorage:', e);
+        }
+
+        // 2. sessionStorage (same-origin only, but different from localStorage)
+        try {
+          sessionStorage.setItem('pendingCodespaceLaunch', launchDataStr);
+          console.log('[Launch] Saved to sessionStorage');
+        } catch (e) {
+          console.warn('[Launch] Failed to save to sessionStorage:', e);
+        }
+
+        // 3. Cookie (expires in 10 minutes, may work cross-origin in some cases)
+        try {
+          document.cookie = `pendingCodespaceLaunch=${encodeURIComponent(launchDataStr)}; path=/; max-age=600; SameSite=Lax`;
+          console.log('[Launch] Saved to cookie');
+        } catch (e) {
+          console.warn('[Launch] Failed to save to cookie:', e);
+        }
+
+        console.log('[Launch] Starting OAuth with launch data:', launchData);
+
+        // Pass launch data to OAuth function - it will encode it in the redirect URL
+        const { error } = await signInWithGitHub(launchData);
         if (error) {
           console.error("GitHub auth failed:", error);
           alert("GitHub authentication failed. Please check your Supabase GitHub OAuth configuration.");
           localStorage.removeItem('pendingCodespaceLaunch');
+          sessionStorage.removeItem('pendingCodespaceLaunch');
+          document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
           setIsLaunching(false);
         }
         // After OAuth redirect, the useEffect will handle the launch
