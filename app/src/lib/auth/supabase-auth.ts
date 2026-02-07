@@ -38,8 +38,22 @@ export async function signInWithGitHub(launchToken?: string) {
 
 export async function getSession() {
   const supabase = createClient()
+
+  // First try to get session from local storage/cookies
   const { data: { session } } = await supabase.auth.getSession()
-  return session
+  if (session) {
+    return session
+  }
+
+  // If no session, try to get user (makes server call, more reliable after OAuth)
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (user && !error) {
+    // User exists, try to refresh the session
+    const { data: { session: refreshedSession } } = await supabase.auth.refreshSession()
+    return refreshedSession
+  }
+
+  return null
 }
 
 export async function signOut() {
