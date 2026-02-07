@@ -158,30 +158,71 @@ export default function LandingPage() {
         document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
 
         if (launchData) {
-          // Wait for session with multiple retries (session can take time to establish)
-          const waitForSession = async (maxRetries = 5, delayMs = 1000): Promise<any> => {
-            for (let i = 0; i < maxRetries; i++) {
-              console.log(`[Launch] Checking session (attempt ${i + 1}/${maxRetries})...`);
-              const session = await getSession();
-              if (session) {
-                console.log('[Launch] Session established!');
-                return session;
-              }
-              if (i < maxRetries - 1) {
-                console.log(`[Launch] No session yet, waiting ${delayMs}ms...`);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-              }
-            }
-            return null;
+          // Use auth state listener for more reliable session detection
+          const { createClient } = await import('@/lib/supabase/client');
+          const supabase = createClient();
+
+          // Wait for session using auth state change listener
+          const waitForSession = (): Promise<any> => {
+            return new Promise((resolve) => {
+              let resolved = false;
+              const timeout = setTimeout(() => {
+                if (!resolved) {
+                  resolved = true;
+                  console.log('[Launch] Session wait timeout');
+                  resolve(null);
+                }
+              }, 10000); // 10 second timeout
+
+              // Check immediately first
+              supabase.auth.getSession().then(({ data: { session } }) => {
+                if (session && !resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  console.log('[Launch] Session found immediately');
+                  resolve(session);
+                }
+              });
+
+              // Also listen for auth state changes
+              const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+                console.log('[Launch] Auth state change:', event, !!session);
+                if (session && !resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  subscription.unsubscribe();
+                  resolve(session);
+                }
+              });
+
+              // Also try getUser as fallback (makes server call)
+              setTimeout(async () => {
+                if (!resolved) {
+                  console.log('[Launch] Trying getUser fallback...');
+                  const { data: { user } } = await supabase.auth.getUser();
+                  if (user && !resolved) {
+                    console.log('[Launch] User found via getUser, refreshing session...');
+                    const { data: { session } } = await supabase.auth.refreshSession();
+                    if (session && !resolved) {
+                      resolved = true;
+                      clearTimeout(timeout);
+                      subscription.unsubscribe();
+                      resolve(session);
+                    }
+                  }
+                }
+              }, 2000);
+            });
           };
 
-          const session = await waitForSession(5, 1500);
+          console.log('[Launch] Waiting for session...');
+          const session = await waitForSession();
 
           if (session) {
             console.log('[Launch] Launching codespace with data:', launchData);
             await launchCodespace(launchData);
           } else {
-            console.error('[Launch] Session not established after multiple retries');
+            console.error('[Launch] Session not established after waiting');
             alert('Authentication session not established. Please try again or refresh the page.');
             setIsLaunching(false);
           }
