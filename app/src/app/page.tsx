@@ -40,29 +40,54 @@ export default function LandingPage() {
       // Check if we're returning from OAuth
       const urlParams = new URLSearchParams(window.location.search);
       const shouldLaunch = urlParams.get('launch') === 'pending';
+      const hasError = urlParams.get('error');
+
+      console.log('[Launch] Checking pending launch:', { shouldLaunch, hasError, url: window.location.href });
+
+      if (hasError) {
+        console.error('[Launch] OAuth error detected:', hasError);
+        alert(`Authentication failed: ${hasError}. Please try again.`);
+        window.history.replaceState({}, '', '/');
+        setIsLaunching(false);
+        return;
+      }
 
       if (shouldLaunch) {
         // Remove launch parameter from URL
         window.history.replaceState({}, '', '/');
 
         const pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
+        console.log('[Launch] Pending launch data:', pendingLaunch);
+
         if (pendingLaunch) {
           const launchData = JSON.parse(pendingLaunch);
           localStorage.removeItem('pendingCodespaceLaunch');
 
           // Check if user is authenticated
           const session = await getSession();
+          console.log('[Launch] Session after OAuth:', session ? 'exists' : 'null');
+
           if (session) {
+            console.log('[Launch] Launching codespace with data:', launchData);
             await launchCodespace(launchData);
           } else {
+            console.log('[Launch] No session, retrying in 1s...');
             // Session not ready yet, retry after a short delay
             setTimeout(async () => {
               const retrySession = await getSession();
+              console.log('[Launch] Retry session:', retrySession ? 'exists' : 'null');
               if (retrySession) {
                 await launchCodespace(launchData);
+              } else {
+                console.error('[Launch] Still no session after retry');
+                alert('Authentication session not established. Please try again.');
+                setIsLaunching(false);
               }
             }, 1000);
           }
+        } else {
+          console.warn('[Launch] No pending launch data found in localStorage');
+          setIsLaunching(false);
         }
       }
     };
