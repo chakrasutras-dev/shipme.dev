@@ -158,28 +158,32 @@ export default function LandingPage() {
         document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
 
         if (launchData) {
+          // Wait for session with multiple retries (session can take time to establish)
+          const waitForSession = async (maxRetries = 5, delayMs = 1000): Promise<any> => {
+            for (let i = 0; i < maxRetries; i++) {
+              console.log(`[Launch] Checking session (attempt ${i + 1}/${maxRetries})...`);
+              const session = await getSession();
+              if (session) {
+                console.log('[Launch] Session established!');
+                return session;
+              }
+              if (i < maxRetries - 1) {
+                console.log(`[Launch] No session yet, waiting ${delayMs}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+              }
+            }
+            return null;
+          };
 
-          // Check if user is authenticated
-          const session = await getSession();
-          console.log('[Launch] Session after OAuth:', session ? 'exists' : 'null');
+          const session = await waitForSession(5, 1500);
 
           if (session) {
             console.log('[Launch] Launching codespace with data:', launchData);
             await launchCodespace(launchData);
           } else {
-            console.log('[Launch] No session, retrying in 1s...');
-            // Session not ready yet, retry after a short delay
-            setTimeout(async () => {
-              const retrySession = await getSession();
-              console.log('[Launch] Retry session:', retrySession ? 'exists' : 'null');
-              if (retrySession) {
-                await launchCodespace(launchData);
-              } else {
-                console.error('[Launch] Still no session after retry');
-                alert('Authentication session not established. Please try again.');
-                setIsLaunching(false);
-              }
-            }, 1000);
+            console.error('[Launch] Session not established after multiple retries');
+            alert('Authentication session not established. Please try again or refresh the page.');
+            setIsLaunching(false);
           }
         } else {
           console.warn('[Launch] No pending launch data found in any storage');
