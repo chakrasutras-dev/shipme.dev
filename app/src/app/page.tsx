@@ -55,75 +55,82 @@ export default function LandingPage() {
       if (shouldLaunch) {
         // Remove launch parameter from URL
         window.history.replaceState({}, '', '/');
+        setIsLaunching(true);
 
-        // Try multiple sources for launch data (in order of preference)
-        let pendingLaunch: string | null = null;
+        let launchData = null;
         let dataSource = 'none';
 
-        // 1. Try localStorage first
-        pendingLaunch = localStorage.getItem('pendingCodespaceLaunch');
-        if (pendingLaunch) {
-          dataSource = 'localStorage';
-          console.log('[Launch] Found data in localStorage');
+        // PRIMARY: Try server-side storage first (most reliable for cross-origin)
+        try {
+          console.log('[Launch] Trying server-side storage...');
+          const response = await fetch('/api/pending-launch');
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.launchData) {
+              launchData = result.launchData;
+              dataSource = 'server';
+              console.log('[Launch] Found data in server storage');
+            }
+          }
+        } catch (e) {
+          console.warn('[Launch] Server storage failed:', e);
         }
 
-        // 2. If not in localStorage, try reading from cookie
-        if (!pendingLaunch) {
+        // FALLBACK 1: Try localStorage
+        if (!launchData) {
+          const stored = localStorage.getItem('pendingCodespaceLaunch');
+          if (stored) {
+            try {
+              launchData = JSON.parse(stored);
+              dataSource = 'localStorage';
+              console.log('[Launch] Found data in localStorage');
+            } catch (e) {
+              console.warn('[Launch] Failed to parse localStorage:', e);
+            }
+          }
+        }
+
+        // FALLBACK 2: Try cookie
+        if (!launchData) {
           const cookies = document.cookie.split(';');
           for (const cookie of cookies) {
             const [name, value] = cookie.trim().split('=');
             if (name === 'pendingCodespaceLaunch' && value) {
-              pendingLaunch = decodeURIComponent(value);
-              dataSource = 'cookie';
-              console.log('[Launch] Found data in cookie');
+              try {
+                launchData = JSON.parse(decodeURIComponent(value));
+                dataSource = 'cookie';
+                console.log('[Launch] Found data in cookie');
+              } catch (e) {
+                console.warn('[Launch] Failed to parse cookie:', e);
+              }
               break;
             }
           }
         }
 
-        // 3. Try sessionStorage as another fallback
-        if (!pendingLaunch) {
-          pendingLaunch = sessionStorage.getItem('pendingCodespaceLaunch');
-          if (pendingLaunch) {
-            dataSource = 'sessionStorage';
-            console.log('[Launch] Found data in sessionStorage');
-          }
-        }
-
-        // 4. Check URL hash for encoded data (survives cross-origin redirects)
-        if (!pendingLaunch && window.location.hash) {
-          try {
-            const hashParams = new URLSearchParams(window.location.hash.slice(1));
-            const encodedData = hashParams.get('shipme_data');
-            if (encodedData) {
-              pendingLaunch = atob(encodedData);
-              dataSource = 'url_hash';
-              console.log('[Launch] Found data in URL hash');
+        // FALLBACK 3: Try sessionStorage
+        if (!launchData) {
+          const stored = sessionStorage.getItem('pendingCodespaceLaunch');
+          if (stored) {
+            try {
+              launchData = JSON.parse(stored);
+              dataSource = 'sessionStorage';
+              console.log('[Launch] Found data in sessionStorage');
+            } catch (e) {
+              console.warn('[Launch] Failed to parse sessionStorage:', e);
             }
-          } catch (e) {
-            console.warn('[Launch] Failed to parse URL hash data:', e);
           }
         }
 
         console.log('[Launch] Pending launch data source:', dataSource);
-        console.log('[Launch] Pending launch data:', pendingLaunch);
+        console.log('[Launch] Pending launch data:', launchData);
 
-        if (pendingLaunch) {
-          let launchData;
-          try {
-            launchData = JSON.parse(pendingLaunch);
-          } catch (e) {
-            console.error('[Launch] Failed to parse launch data:', e);
-            alert('Invalid launch data. Please try again.');
-            setIsLaunching(false);
-            return;
-          }
+        // Clear all client-side storage
+        localStorage.removeItem('pendingCodespaceLaunch');
+        sessionStorage.removeItem('pendingCodespaceLaunch');
+        document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
 
-          // Clear all storage
-          localStorage.removeItem('pendingCodespaceLaunch');
-          sessionStorage.removeItem('pendingCodespaceLaunch');
-          document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
-          window.history.replaceState({}, '', '/');
+        if (launchData) {
 
           // Check if user is authenticated
           const session = await getSession();
@@ -211,35 +218,38 @@ export default function LandingPage() {
       } else {
         const launchDataStr = JSON.stringify(launchData);
 
-        // Save launch data in MULTIPLE places for cross-origin persistence
-        // 1. localStorage (same-origin only)
+        // PRIMARY: Store on server (survives cross-origin OAuth redirects)
+        try {
+          console.log('[Launch] Storing on server...');
+          const response = await fetch('/api/pending-launch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: launchDataStr
+          });
+          if (response.ok) {
+            const result = await response.json();
+            console.log('[Launch] Stored on server with token:', result.token);
+          } else {
+            console.warn('[Launch] Server storage failed:', await response.text());
+          }
+        } catch (e) {
+          console.warn('[Launch] Server storage error:', e);
+        }
+
+        // FALLBACK: Also save to client-side storage
         try {
           localStorage.setItem('pendingCodespaceLaunch', launchDataStr);
-          console.log('[Launch] Saved to localStorage');
-        } catch (e) {
-          console.warn('[Launch] Failed to save to localStorage:', e);
-        }
-
-        // 2. sessionStorage (same-origin only, but different from localStorage)
-        try {
           sessionStorage.setItem('pendingCodespaceLaunch', launchDataStr);
-          console.log('[Launch] Saved to sessionStorage');
-        } catch (e) {
-          console.warn('[Launch] Failed to save to sessionStorage:', e);
-        }
-
-        // 3. Cookie (expires in 10 minutes, may work cross-origin in some cases)
-        try {
           document.cookie = `pendingCodespaceLaunch=${encodeURIComponent(launchDataStr)}; path=/; max-age=600; SameSite=Lax`;
-          console.log('[Launch] Saved to cookie');
+          console.log('[Launch] Saved to client-side storage as fallback');
         } catch (e) {
-          console.warn('[Launch] Failed to save to cookie:', e);
+          console.warn('[Launch] Client-side storage failed:', e);
         }
 
-        console.log('[Launch] Starting OAuth with launch data:', launchData);
+        console.log('[Launch] Starting OAuth...');
 
-        // Pass launch data to OAuth function - it will encode it in the redirect URL
-        const { error } = await signInWithGitHub(launchData);
+        // Start OAuth (no need to pass launch data anymore - it's on the server)
+        const { error } = await signInWithGitHub();
         if (error) {
           console.error("GitHub auth failed:", error);
           alert("GitHub authentication failed. Please check your Supabase GitHub OAuth configuration.");
