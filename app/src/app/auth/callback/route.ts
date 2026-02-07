@@ -4,19 +4,25 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
-  const launchToken = requestUrl.searchParams.get('launch_token')
+  const launchData = requestUrl.searchParams.get('launch_data')
   const origin = requestUrl.origin
 
   console.log('[Callback] Processing OAuth callback', {
     hasCode: !!code,
-    hasLaunchToken: !!launchToken,
+    hasLaunchData: !!launchData,
     origin
   })
 
-  // Build the redirect URL first
-  let redirectPath = `/?launch=pending`
-  if (launchToken) {
-    redirectPath += `&launch_token=${launchToken}`
+  // Build the redirect URL - pass launch data through
+  let redirectPath = '/'
+  const params = new URLSearchParams()
+  if (launchData) {
+    params.set('launch', 'pending')
+    params.set('launch_data', launchData)
+  }
+  const queryString = params.toString()
+  if (queryString) {
+    redirectPath += `?${queryString}`
   }
 
   const redirectUrl = new URL(redirectPath, origin)

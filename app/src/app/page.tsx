@@ -34,203 +34,99 @@ export default function LandingPage() {
     }
   };
 
-  // Check for pending launch after OAuth
+  // Check for pending launch after OAuth redirect
   useEffect(() => {
     const checkPendingLaunch = async () => {
-      // Check if we're returning from OAuth
       const urlParams = new URLSearchParams(window.location.search);
       const shouldLaunch = urlParams.get('launch') === 'pending';
       const hasError = urlParams.get('error');
 
-      console.log('[Launch] Checking pending launch:', { shouldLaunch, hasError, url: window.location.href });
-
       if (hasError) {
-        console.error('[Launch] OAuth error detected:', hasError);
         alert(`Authentication failed: ${hasError}. Please try again.`);
         window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      if (!shouldLaunch) return;
+
+      setIsLaunching(true);
+
+      // Decode launch data from URL (base64 encoded JSON)
+      const encodedData = urlParams.get('launch_data');
+      window.history.replaceState({}, '', '/');
+
+      if (!encodedData) {
+        console.error('[Launch] No launch_data in URL');
+        alert('Launch data was lost during authentication. Please try again.');
         setIsLaunching(false);
         return;
       }
 
-      if (shouldLaunch) {
-        setIsLaunching(true);
+      let launchData;
+      try {
+        launchData = JSON.parse(atob(encodedData));
+        console.log('[Launch] Decoded launch data:', launchData);
+      } catch (e) {
+        console.error('[Launch] Failed to decode launch data:', e);
+        alert('Launch data was corrupted. Please try again.');
+        setIsLaunching(false);
+        return;
+      }
 
-        // Get launch token from URL if present
-        const launchToken = urlParams.get('launch_token');
-        console.log('[Launch] Launch token from URL:', launchToken);
+      // Wait for session using auth state listener
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
 
-        // Remove parameters from URL
-        window.history.replaceState({}, '', '/');
+      const waitForSession = (): Promise<any> => {
+        return new Promise((resolve) => {
+          let resolved = false;
+          const timeout = setTimeout(() => {
+            if (!resolved) { resolved = true; resolve(null); }
+          }, 10000);
 
-        let launchData = null;
-        let dataSource = 'none';
-
-        // PRIMARY: Try server-side storage with token from URL
-        if (launchToken) {
-          try {
-            console.log('[Launch] Fetching from server with token:', launchToken);
-            const response = await fetch(`/api/pending-launch?token=${launchToken}`);
-            if (response.ok) {
-              const result = await response.json();
-              if (result.success && result.launchData) {
-                launchData = result.launchData;
-                dataSource = 'server';
-                console.log('[Launch] Found data in server storage');
-              }
-            } else {
-              console.warn('[Launch] Server returned:', response.status, await response.text());
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session && !resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              resolve(session);
             }
-          } catch (e) {
-            console.warn('[Launch] Server storage failed:', e);
-          }
-        }
+          });
 
-        // FALLBACK: Try server-side storage without token (cookie-based)
-        if (!launchData) {
-          try {
-            console.log('[Launch] Trying server storage without token...');
-            const response = await fetch('/api/pending-launch');
-            if (response.ok) {
-              const result = await response.json();
-              if (result.success && result.launchData) {
-                launchData = result.launchData;
-                dataSource = 'server-cookie';
-                console.log('[Launch] Found data in server storage (cookie)');
-              }
+          const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (session && !resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              subscription.unsubscribe();
+              resolve(session);
             }
-          } catch (e) {
-            console.warn('[Launch] Server storage (cookie) failed:', e);
-          }
-        }
+          });
 
-        // FALLBACK 1: Try localStorage
-        if (!launchData) {
-          const stored = localStorage.getItem('pendingCodespaceLaunch');
-          if (stored) {
-            try {
-              launchData = JSON.parse(stored);
-              dataSource = 'localStorage';
-              console.log('[Launch] Found data in localStorage');
-            } catch (e) {
-              console.warn('[Launch] Failed to parse localStorage:', e);
-            }
-          }
-        }
-
-        // FALLBACK 2: Try cookie
-        if (!launchData) {
-          const cookies = document.cookie.split(';');
-          for (const cookie of cookies) {
-            const [name, value] = cookie.trim().split('=');
-            if (name === 'pendingCodespaceLaunch' && value) {
-              try {
-                launchData = JSON.parse(decodeURIComponent(value));
-                dataSource = 'cookie';
-                console.log('[Launch] Found data in cookie');
-              } catch (e) {
-                console.warn('[Launch] Failed to parse cookie:', e);
-              }
-              break;
-            }
-          }
-        }
-
-        // FALLBACK 3: Try sessionStorage
-        if (!launchData) {
-          const stored = sessionStorage.getItem('pendingCodespaceLaunch');
-          if (stored) {
-            try {
-              launchData = JSON.parse(stored);
-              dataSource = 'sessionStorage';
-              console.log('[Launch] Found data in sessionStorage');
-            } catch (e) {
-              console.warn('[Launch] Failed to parse sessionStorage:', e);
-            }
-          }
-        }
-
-        console.log('[Launch] Pending launch data source:', dataSource);
-        console.log('[Launch] Pending launch data:', launchData);
-
-        // Clear all client-side storage
-        localStorage.removeItem('pendingCodespaceLaunch');
-        sessionStorage.removeItem('pendingCodespaceLaunch');
-        document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
-
-        if (launchData) {
-          // Use auth state listener for more reliable session detection
-          const { createClient } = await import('@/lib/supabase/client');
-          const supabase = createClient();
-
-          // Wait for session using auth state change listener
-          const waitForSession = (): Promise<any> => {
-            return new Promise((resolve) => {
-              let resolved = false;
-              const timeout = setTimeout(() => {
-                if (!resolved) {
-                  resolved = true;
-                  console.log('[Launch] Session wait timeout');
-                  resolve(null);
-                }
-              }, 10000); // 10 second timeout
-
-              // Check immediately first
-              supabase.auth.getSession().then(({ data: { session } }) => {
-                if (session && !resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  console.log('[Launch] Session found immediately');
-                  resolve(session);
-                }
-              });
-
-              // Also listen for auth state changes
-              const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-                console.log('[Launch] Auth state change:', event, !!session);
+          setTimeout(async () => {
+            if (!resolved) {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user && !resolved) {
+                const { data: { session } } = await supabase.auth.refreshSession();
                 if (session && !resolved) {
                   resolved = true;
                   clearTimeout(timeout);
                   subscription.unsubscribe();
                   resolve(session);
                 }
-              });
+              }
+            }
+          }, 2000);
+        });
+      };
 
-              // Also try getUser as fallback (makes server call)
-              setTimeout(async () => {
-                if (!resolved) {
-                  console.log('[Launch] Trying getUser fallback...');
-                  const { data: { user } } = await supabase.auth.getUser();
-                  if (user && !resolved) {
-                    console.log('[Launch] User found via getUser, refreshing session...');
-                    const { data: { session } } = await supabase.auth.refreshSession();
-                    if (session && !resolved) {
-                      resolved = true;
-                      clearTimeout(timeout);
-                      subscription.unsubscribe();
-                      resolve(session);
-                    }
-                  }
-                }
-              }, 2000);
-            });
-          };
+      const session = await waitForSession();
 
-          console.log('[Launch] Waiting for session...');
-          const session = await waitForSession();
-
-          if (session) {
-            console.log('[Launch] Launching codespace with data:', launchData);
-            await launchCodespace(launchData);
-          } else {
-            console.error('[Launch] Session not established after waiting');
-            alert('Authentication session not established. Please try again or refresh the page.');
-            setIsLaunching(false);
-          }
-        } else {
-          console.warn('[Launch] No pending launch data found in any storage');
-          alert('Launch data was lost during authentication. This can happen on preview deploys. Please try again.');
-          setIsLaunching(false);
-        }
+      if (session) {
+        console.log('[Launch] Session found, launching codespace');
+        await launchCodespace(launchData);
+      } else {
+        console.error('[Launch] Session not established');
+        alert('Authentication session not established. Please try again.');
+        setIsLaunching(false);
       }
     };
 
@@ -270,10 +166,8 @@ export default function LandingPage() {
     setIsLaunching(true);
 
     try {
-      // Check if user is already authenticated
       const session = await getSession();
 
-      // Use provided repo name or generate from project idea
       const finalRepoName = repoName.trim()
         ? repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-')
         : projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -285,54 +179,18 @@ export default function LandingPage() {
       };
 
       if (session) {
-        // User is authenticated, launch immediately
         await launchCodespace(launchData);
       } else {
-        const launchDataStr = JSON.stringify(launchData);
-        let serverToken: string | null = null;
+        // Encode launch data as base64 to pass through OAuth URL
+        const encoded = btoa(JSON.stringify(launchData));
+        console.log('[Launch] Encoded launch data, starting OAuth');
 
-        // PRIMARY: Store on server and get token (survives cross-origin OAuth redirects)
-        try {
-          console.log('[Launch] Storing on server...');
-          const response = await fetch('/api/pending-launch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: launchDataStr
-          });
-          if (response.ok) {
-            const result = await response.json();
-            serverToken = result.token;
-            console.log('[Launch] Stored on server with token:', serverToken);
-          } else {
-            console.warn('[Launch] Server storage failed:', await response.text());
-          }
-        } catch (e) {
-          console.warn('[Launch] Server storage error:', e);
-        }
-
-        // FALLBACK: Also save to client-side storage
-        try {
-          localStorage.setItem('pendingCodespaceLaunch', launchDataStr);
-          sessionStorage.setItem('pendingCodespaceLaunch', launchDataStr);
-          document.cookie = `pendingCodespaceLaunch=${encodeURIComponent(launchDataStr)}; path=/; max-age=600; SameSite=Lax`;
-          console.log('[Launch] Saved to client-side storage as fallback');
-        } catch (e) {
-          console.warn('[Launch] Client-side storage failed:', e);
-        }
-
-        console.log('[Launch] Starting OAuth with token:', serverToken);
-
-        // Start OAuth - pass token so it's included in the redirect URL
-        const { error } = await signInWithGitHub(serverToken || undefined);
+        const { error } = await signInWithGitHub(encoded);
         if (error) {
           console.error("GitHub auth failed:", error);
-          alert("GitHub authentication failed. Please check your Supabase GitHub OAuth configuration.");
-          localStorage.removeItem('pendingCodespaceLaunch');
-          sessionStorage.removeItem('pendingCodespaceLaunch');
-          document.cookie = 'pendingCodespaceLaunch=; path=/; max-age=0';
+          alert("GitHub authentication failed. Please try again.");
           setIsLaunching(false);
         }
-        // After OAuth redirect, the useEffect will handle the launch
       }
     } catch (err) {
       console.error("Launch error:", err);
