@@ -16,9 +16,6 @@ export async function GET(request: NextRequest) {
   console.log('[Callback] OAuth callback', { hasCode: !!code, origin, forwardedHost })
 
   if (code) {
-    // Create the redirect response FIRST, then create Supabase client
-    // that writes cookies directly onto this response.
-    // This is the Supabase-recommended pattern for Route Handlers.
     const redirectResponse = NextResponse.redirect(new URL('/?launch=pending', origin))
 
     const supabase = createServerClient(
@@ -31,6 +28,10 @@ export async function GET(request: NextRequest) {
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
+              // Update request.cookies so subsequent getAll() reads return
+              // the freshly set values. Without this, the Supabase client
+              // re-reads stale cookies and thinks the session wasn't stored.
+              request.cookies.set(name, value)
               redirectResponse.cookies.set(name, value, options)
             })
           },
@@ -57,6 +58,10 @@ export async function GET(request: NextRequest) {
         path: '/'
       })
     }
+
+    // Log how many cookies are being sent back
+    const responseCookies = redirectResponse.headers.getSetCookie()
+    console.log('[Callback] Set-Cookie headers on redirect:', responseCookies.length)
 
     return redirectResponse
   }

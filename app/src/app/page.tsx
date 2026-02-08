@@ -106,7 +106,7 @@ export default function LandingPage() {
         console.error("Launch failed:", result);
         // Show debug info if available
         const debugInfo = result.debug
-          ? `\n\nDebug: ${result.debug.cookieCount} cookies, auth cookies: ${result.debug.hasAuthCookies}, error: ${result.debug.authError}`
+          ? `\n\nDebug: ${result.debug.cookieCount} cookies [${(result.debug.cookieNames || []).join(', ')}], error: ${result.debug.authError}`
           : '';
         alert(`Failed to launch: ${result.error || 'Unknown error'}${debugInfo}`);
       }
