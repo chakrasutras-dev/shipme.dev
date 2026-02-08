@@ -5,10 +5,17 @@ import { cookies } from 'next/headers'
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
-  const origin = requestUrl.origin
+
+  // On Netlify, request.url may show the internal Netlify URL, not the custom domain.
+  // Use x-forwarded-host header to get the real origin.
+  const forwardedHost = request.headers.get('x-forwarded-host')
+  const origin = forwardedHost
+    ? `https://${forwardedHost}`
+    : requestUrl.origin
+
+  console.log('[Callback] OAuth callback', { hasCode: !!code, origin, forwardedHost })
 
   if (code) {
-    // Exchange the code on the server using the standard Supabase SSR pattern
     const supabase = await createClient()
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
@@ -17,12 +24,11 @@ export async function GET(request: Request) {
       return NextResponse.redirect(new URL('/?error=auth_failed', origin))
     }
 
-    // Store GitHub provider token
     if (data?.session?.provider_token) {
       const cookieStore = await cookies()
       cookieStore.set('github_provider_token', data.session.provider_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 7,
         path: '/'
