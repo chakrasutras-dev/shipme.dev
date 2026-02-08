@@ -58,8 +58,6 @@ export default function LandingPage() {
 
       if (!stored) {
         console.error('[Launch] No launch data in localStorage');
-        console.error('[Launch] localStorage keys:', Object.keys(localStorage));
-        console.error('[Launch] Origin:', window.location.origin);
         alert('Launch data was lost. Please try again.');
         setIsLaunching(false);
         return;
@@ -76,65 +74,11 @@ export default function LandingPage() {
         return;
       }
 
-      // Wait for session
-      const { createClient } = await import('@/lib/supabase/client');
-      const supabase = createClient();
-
-      const waitForSession = (): Promise<any> => {
-        return new Promise((resolve) => {
-          let resolved = false;
-          const timeout = setTimeout(() => {
-            if (!resolved) { resolved = true; resolve(null); }
-          }, 10000);
-
-          supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session && !resolved) {
-              resolved = true;
-              clearTimeout(timeout);
-              console.log('[Launch] Session found via getSession');
-              resolve(session);
-            }
-          });
-
-          const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (session && !resolved) {
-              resolved = true;
-              clearTimeout(timeout);
-              subscription.unsubscribe();
-              console.log('[Launch] Session found via onAuthStateChange');
-              resolve(session);
-            }
-          });
-
-          setTimeout(async () => {
-            if (!resolved) {
-              console.log('[Launch] Trying getUser fallback...');
-              const { data: { user } } = await supabase.auth.getUser();
-              if (user && !resolved) {
-                const { data: { session } } = await supabase.auth.refreshSession();
-                if (session && !resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  subscription.unsubscribe();
-                  console.log('[Launch] Session found via getUser+refresh');
-                  resolve(session);
-                }
-              }
-            }
-          }, 2000);
-        });
-      };
-
-      const session = await waitForSession();
-
-      if (session) {
-        console.log('[Launch] Launching codespace...');
-        await launchCodespace(launchData);
-      } else {
-        console.error('[Launch] Session not established after 10s');
-        alert('Authentication session not established. Please try again.');
-        setIsLaunching(false);
-      }
+      // Don't wait for client-side session detection.
+      // The server exchanged the code and set session cookies.
+      // Just call the launch API directly - it checks auth server-side.
+      console.log('[Launch] Calling launch API directly...');
+      await launchCodespace(launchData);
     };
 
     checkPendingLaunch();
