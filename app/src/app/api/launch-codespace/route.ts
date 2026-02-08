@@ -4,13 +4,30 @@ import { Octokit } from '@octokit/rest'
 import { cookies } from 'next/headers'
 
 export async function POST(request: Request) {
+  // Debug: log what cookies are present
+  const cookieStore = await cookies()
+  const allCookies = cookieStore.getAll()
+  const cookieNames = allCookies.map(c => c.name)
+  const hasAuthCookies = cookieNames.some(n => n.startsWith('sb-'))
+  console.log('[Launch] Cookies present:', cookieNames.length, 'names:', cookieNames.join(', '))
+  console.log('[Launch] Has Supabase auth cookies:', hasAuthCookies)
+
   const supabase = await createClient()
 
   // Use getUser() for reliable server-side auth (validates with Supabase server)
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   if (userError || !user) {
     console.error('[Launch] Auth check failed:', userError?.message || 'No user')
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    console.error('[Launch] Cookie names:', cookieNames.join(', '))
+    return NextResponse.json({
+      error: 'Unauthorized',
+      debug: {
+        cookieCount: allCookies.length,
+        hasAuthCookies,
+        cookieNames,
+        authError: userError?.message || 'No user found'
+      }
+    }, { status: 401 })
   }
 
   // Also get session for provider_token and user id
@@ -28,7 +45,6 @@ export async function POST(request: Request) {
     }
 
     // Get GitHub token - first try session, then cookie
-    const cookieStore = await cookies()
     const githubToken = session?.provider_token || cookieStore.get('github_provider_token')?.value
     if (!githubToken) {
       return NextResponse.json(

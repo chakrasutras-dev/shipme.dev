@@ -90,6 +90,7 @@ export default function LandingPage() {
       const response = await fetch("/api/launch-codespace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(launchData),
       });
 
@@ -103,7 +104,11 @@ export default function LandingPage() {
         }
       } else {
         console.error("Launch failed:", result);
-        alert(`Failed to launch: ${result.error || 'Unknown error'}`);
+        // Show debug info if available
+        const debugInfo = result.debug
+          ? `\n\nDebug: ${result.debug.cookieCount} cookies, auth cookies: ${result.debug.hasAuthCookies}, error: ${result.debug.authError}`
+          : '';
+        alert(`Failed to launch: ${result.error || 'Unknown error'}${debugInfo}`);
       }
     } catch (err) {
       console.error("Launch error:", err);
