@@ -1,8 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { type NextRequest } from 'next/server'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
 
@@ -16,7 +16,28 @@ export async function GET(request: Request) {
   console.log('[Callback] OAuth callback', { hasCode: !!code, origin, forwardedHost })
 
   if (code) {
-    const supabase = await createClient()
+    // Create the redirect response FIRST, then create Supabase client
+    // that writes cookies directly onto this response.
+    // This is the Supabase-recommended pattern for Route Handlers.
+    const redirectResponse = NextResponse.redirect(new URL('/?launch=pending', origin))
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              redirectResponse.cookies.set(name, value, options)
+            })
+          },
+        },
+      }
+    )
+
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
     if (error) {
@@ -24,9 +45,11 @@ export async function GET(request: Request) {
       return NextResponse.redirect(new URL('/?error=auth_failed', origin))
     }
 
-    if (data?.session?.provider_token) {
-      const cookieStore = await cookies()
-      cookieStore.set('github_provider_token', data.session.provider_token, {
+    console.log('[Callback] Session established for:', data.session?.user?.email)
+
+    // Store GitHub provider token as a cookie on the redirect response
+    if (data.session?.provider_token) {
+      redirectResponse.cookies.set('github_provider_token', data.session.provider_token, {
         httpOnly: true,
         secure: true,
         sameSite: 'lax',
@@ -34,6 +57,8 @@ export async function GET(request: Request) {
         path: '/'
       })
     }
+
+    return redirectResponse
   }
 
   return NextResponse.redirect(new URL('/?launch=pending', origin))

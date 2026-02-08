@@ -5,11 +5,16 @@ import { cookies } from 'next/headers'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
 
-  if (!session) {
+  // Use getUser() for reliable server-side auth (validates with Supabase server)
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) {
+    console.error('[Launch] Auth check failed:', userError?.message || 'No user')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  // Also get session for provider_token and user id
+  const { data: { session } } = await supabase.auth.getSession()
 
   try {
     const { projectName, description, stack } = await request.json()
