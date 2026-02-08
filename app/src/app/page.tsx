@@ -50,30 +50,33 @@ export default function LandingPage() {
       if (!shouldLaunch) return;
 
       setIsLaunching(true);
-
-      // Decode launch data from URL (base64 encoded JSON)
-      const encodedData = urlParams.get('launch_data');
       window.history.replaceState({}, '', '/');
 
-      if (!encodedData) {
-        console.error('[Launch] No launch_data in URL');
-        alert('Launch data was lost during authentication. Please try again.');
+      // Read launch data from localStorage (stored before OAuth redirect)
+      const stored = localStorage.getItem('pendingCodespaceLaunch');
+      localStorage.removeItem('pendingCodespaceLaunch');
+
+      if (!stored) {
+        console.error('[Launch] No launch data in localStorage');
+        console.error('[Launch] localStorage keys:', Object.keys(localStorage));
+        console.error('[Launch] Origin:', window.location.origin);
+        alert('Launch data was lost. Please try again.');
         setIsLaunching(false);
         return;
       }
 
       let launchData;
       try {
-        launchData = JSON.parse(atob(encodedData));
-        console.log('[Launch] Decoded launch data:', launchData);
+        launchData = JSON.parse(stored);
+        console.log('[Launch] Got launch data from localStorage:', launchData);
       } catch (e) {
-        console.error('[Launch] Failed to decode launch data:', e);
+        console.error('[Launch] Failed to parse launch data:', e);
         alert('Launch data was corrupted. Please try again.');
         setIsLaunching(false);
         return;
       }
 
-      // Wait for session using auth state listener
+      // Wait for session
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
 
@@ -88,6 +91,7 @@ export default function LandingPage() {
             if (session && !resolved) {
               resolved = true;
               clearTimeout(timeout);
+              console.log('[Launch] Session found via getSession');
               resolve(session);
             }
           });
@@ -97,12 +101,14 @@ export default function LandingPage() {
               resolved = true;
               clearTimeout(timeout);
               subscription.unsubscribe();
+              console.log('[Launch] Session found via onAuthStateChange');
               resolve(session);
             }
           });
 
           setTimeout(async () => {
             if (!resolved) {
+              console.log('[Launch] Trying getUser fallback...');
               const { data: { user } } = await supabase.auth.getUser();
               if (user && !resolved) {
                 const { data: { session } } = await supabase.auth.refreshSession();
@@ -110,6 +116,7 @@ export default function LandingPage() {
                   resolved = true;
                   clearTimeout(timeout);
                   subscription.unsubscribe();
+                  console.log('[Launch] Session found via getUser+refresh');
                   resolve(session);
                 }
               }
@@ -121,10 +128,10 @@ export default function LandingPage() {
       const session = await waitForSession();
 
       if (session) {
-        console.log('[Launch] Session found, launching codespace');
+        console.log('[Launch] Launching codespace...');
         await launchCodespace(launchData);
       } else {
-        console.error('[Launch] Session not established');
+        console.error('[Launch] Session not established after 10s');
         alert('Authentication session not established. Please try again.');
         setIsLaunching(false);
       }
@@ -181,14 +188,16 @@ export default function LandingPage() {
       if (session) {
         await launchCodespace(launchData);
       } else {
-        // Encode launch data as base64 to pass through OAuth URL
-        const encoded = btoa(JSON.stringify(launchData));
-        console.log('[Launch] Encoded launch data, starting OAuth');
+        // Store launch data in localStorage before OAuth redirect
+        // localStorage persists on the same origin (shipme.dev → GitHub → Supabase → shipme.dev)
+        localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
+        console.log('[Launch] Stored in localStorage, origin:', window.location.origin);
 
-        const { error } = await signInWithGitHub(encoded);
+        const { error } = await signInWithGitHub();
         if (error) {
           console.error("GitHub auth failed:", error);
           alert("GitHub authentication failed. Please try again.");
+          localStorage.removeItem('pendingCodespaceLaunch');
           setIsLaunching(false);
         }
       }
