@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
     // Get GitHub token - first try session, then cookie
     const cookieStore = await cookies()
-    const githubToken = session.provider_token || cookieStore.get('github_provider_token')?.value
+    const githubToken = session?.provider_token || cookieStore.get('github_provider_token')?.value
     if (!githubToken) {
       return NextResponse.json(
         { error: 'GitHub authentication required. Please sign in again.' },
@@ -122,7 +122,7 @@ export async function POST(request: Request) {
     const { data: launch, error: dbError } = await supabase
       .from('codespace_launches')
       .insert({
-        user_id: session.user.id,
+        user_id: user.id,
         project_name: projectName,
         project_description: description,
         stack_config: projectConfig.stack,
