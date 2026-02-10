@@ -9,7 +9,6 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     const handleCallback = async () => {
       const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
 
       // Check for errors in both query params and hash
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
@@ -28,7 +27,7 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      if (!code) {
+      if (!params.get("code")) {
         setStatus("No authorization code found.");
         setDebugInfo("No ?code= parameter in URL");
         setTimeout(() => {
@@ -40,28 +39,37 @@ export default function AuthCallbackPage() {
       try {
         setStatus("Exchanging code for session...");
 
-        // Use a fresh, non-singleton Supabase client for the exchange.
-        // The library knows how to read its own cookie-stored code verifier
-        // (including proper URL-decoding), so we don't need to parse it manually.
+        // IMPORTANT: @supabase/ssr's createBrowserClient ALWAYS overrides
+        // detectSessionInUrl to true in browsers (cannot be disabled).
+        // This means _initialize() will auto-detect ?code= in the URL
+        // and exchange it automatically using the cookie-stored code verifier.
+        //
+        // We must NOT call exchangeCodeForSession() explicitly — it would
+        // race with _initialize() and fail ("code verifier not found"
+        // because _initialize() already consumed it).
+        //
+        // Instead, just create the client and let _initialize() handle it.
+        // getSession() waits for _initialize() to complete.
         const { createBrowserClient } = await import("@supabase/ssr");
         const supabase = createBrowserClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          {
-            isSingleton: false,
-            auth: { detectSessionInUrl: false, flowType: "pkce" },
-          }
+          { isSingleton: false }
         );
 
-        const { data, error: exchangeError } =
-          await supabase.auth.exchangeCodeForSession(code);
+        // getSession() waits for _initialize() to complete,
+        // which includes the automatic code exchange.
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        if (exchangeError) {
-          console.error("[Callback] Exchange error:", exchangeError);
-          setStatus(`Exchange failed: ${exchangeError.message}`);
-          setDebugInfo(`Error: ${exchangeError.message}`);
+        if (!session) {
+          const errorMsg = "Session could not be established after code exchange";
+          console.error("[Callback]", errorMsg);
+          setStatus("Exchange failed.");
+          setDebugInfo(errorMsg);
           setTimeout(() => {
-            window.location.href = `/?error=${encodeURIComponent(exchangeError.message)}`;
+            window.location.href = `/?error=${encodeURIComponent(errorMsg)}`;
           }, 10000);
           return;
         }
@@ -69,13 +77,13 @@ export default function AuthCallbackPage() {
         console.log("[Callback] Session established successfully!");
 
         // Store the GitHub provider token as an httpOnly cookie
-        if (data.session?.provider_token) {
+        if (session.provider_token) {
           try {
             await fetch("/api/store-token", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "include",
-              body: JSON.stringify({ token: data.session.provider_token }),
+              body: JSON.stringify({ token: session.provider_token }),
             });
           } catch (e) {
             console.warn("[Callback] Failed to store provider token:", e);
