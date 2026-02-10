@@ -52,6 +52,20 @@ export default function LandingPage() {
       setIsLaunching(true);
       window.history.replaceState({}, '', '/');
 
+      // Restore UI state that was saved before OAuth redirect
+      const savedIdea = localStorage.getItem('pendingProjectIdea');
+      const savedStack = localStorage.getItem('pendingRecommendedStack');
+      if (savedIdea) {
+        setProjectIdea(savedIdea);
+        localStorage.removeItem('pendingProjectIdea');
+      }
+      if (savedStack) {
+        try {
+          setRecommendedStack(JSON.parse(savedStack));
+        } catch {}
+        localStorage.removeItem('pendingRecommendedStack');
+      }
+
       // Read launch data from localStorage (stored before OAuth redirect)
       const stored = localStorage.getItem('pendingCodespaceLaunch');
       localStorage.removeItem('pendingCodespaceLaunch');
@@ -74,9 +88,7 @@ export default function LandingPage() {
         return;
       }
 
-      // Don't wait for client-side session detection.
-      // The server exchanged the code and set session cookies.
-      // Just call the launch API directly - it checks auth server-side.
+      // Call the launch API - it checks auth server-side via cookies
       console.log('[Launch] Calling launch API directly...');
       await launchCodespace(launchData);
     };
@@ -137,9 +149,13 @@ export default function LandingPage() {
       if (session) {
         await launchCodespace(launchData);
       } else {
-        // Store launch data in localStorage before OAuth redirect
+        // Store launch data + UI state in localStorage before OAuth redirect
         // localStorage persists on the same origin (shipme.dev → GitHub → Supabase → shipme.dev)
         localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
+        localStorage.setItem('pendingProjectIdea', projectIdea);
+        if (recommendedStack) {
+          localStorage.setItem('pendingRecommendedStack', JSON.stringify(recommendedStack));
+        }
         console.log('[Launch] Stored in localStorage, origin:', window.location.origin);
 
         const { error } = await signInWithGitHub();
@@ -147,6 +163,8 @@ export default function LandingPage() {
           console.error("GitHub auth failed:", error);
           alert("GitHub authentication failed. Please try again.");
           localStorage.removeItem('pendingCodespaceLaunch');
+          localStorage.removeItem('pendingProjectIdea');
+          localStorage.removeItem('pendingRecommendedStack');
           setIsLaunching(false);
         }
       }
@@ -156,6 +174,32 @@ export default function LandingPage() {
       setIsLaunching(false);
     }
   };
+
+  // Show full-page launching state when auto-launching after OAuth redirect
+  // (covers the case where recommendedStack wasn't restored from localStorage)
+  if (isLaunching && !recommendedStack) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div className="text-center max-w-lg mx-auto px-4">
+          <div className="w-12 h-12 border-2 border-[#00f5ff] border-t-transparent rounded-full animate-spin mx-auto mb-6" />
+          <h2 className="text-2xl font-bold text-white mb-3 font-['Syne']">Launching Your Codespace</h2>
+          <p className="text-slate-400">Setting up your development environment...</p>
+          {launchResult && launchResult.codespace_url && (
+            <a
+              href={launchResult.codespace_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 mt-6 px-6 py-3 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] text-slate-950 rounded-lg font-semibold hover:shadow-xl transition-all"
+            >
+              <Terminal className="w-5 h-5" />
+              Open Codespace
+              <ArrowRight className="w-4 h-4" />
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
