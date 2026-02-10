@@ -42,3 +42,9 @@ mcp-servers/dist/
 # Temporary files
 *.tmp
 *.temp
+
+# Serena (IDE plugin state)
+.serena/
+
+# Claude Code local settings (user-specific)
+.claude/settings.local.json

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { Octokit } from '@octokit/rest'
 import { cookies } from 'next/headers'
 
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
 
     // Template repository configuration
     const TEMPLATE_OWNER = process.env.TEMPLATE_OWNER || user.login
-    const TEMPLATE_REPO = process.env.TEMPLATE_REPO || 'shipme-starter-template'
+    const TEMPLATE_REPO = process.env.TEMPLATE_REPO || 'shipme_template'
 
     // Check if template repository exists
     try {
@@ -102,8 +103,23 @@ export async function POST(request: Request) {
     // Wait for repository to be ready (GitHub template creation is async)
     await new Promise(resolve => setTimeout(resolve, 2000))
 
+    // Generate a one-time provisioning token for API key delivery.
+    // The Codespace's post-create.sh will redeem this token to receive
+    // ShipMe's Anthropic API key for Claude Code.
+    let provisioningToken: string | undefined
+    if (process.env.SHIPME_ANTHROPIC_API_KEY) {
+      provisioningToken = crypto.randomUUID()
+      const serviceClient = createServiceRoleClient()
+      await serviceClient.from('provisioning_tokens').insert({
+        token: provisioningToken,
+        user_id: user.id,
+        anthropic_api_key: process.env.SHIPME_ANTHROPIC_API_KEY,
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min TTL
+      })
+    }
+
     // Inject project configuration into .shipme/project.json
-    const projectConfig = {
+    const projectConfig: Record<string, any> = {
       name: projectName,
       description,
       stack: stack || {
@@ -115,6 +131,9 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
       createdBy: 'shipme.dev',
       version: '2.0.0'
+    }
+    if (provisioningToken) {
+      projectConfig.provisioningToken = provisioningToken
     }
 
     try {

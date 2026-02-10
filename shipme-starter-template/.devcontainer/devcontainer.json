@@ -12,7 +12,8 @@
       "extensions": [
         "anthropic.claude-code",
         "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
       ],
       "settings": {
         "mcp.servers": {
@@ -38,7 +39,9 @@
               "NETLIFY_AUTH_TOKEN": "${localEnv:NETLIFY_AUTH_TOKEN}"
             }
           }
-        }
+        },
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
       }
     }
   },
@@ -65,6 +68,10 @@
     "NETLIFY_AUTH_TOKEN": {
       "description": "Netlify Personal Access Token for site deployment",
       "documentationUrl": "https://app.netlify.com/user/applications"
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Anthropic API key for Claude Code (auto-provided by ShipMe, or bring your own)",
+      "documentationUrl": "https://console.anthropic.com/settings/keys"
     }
   }
 }

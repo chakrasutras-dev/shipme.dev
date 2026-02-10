@@ -267,3 +267,20 @@ CREATE POLICY "Users can view own provisioning events"
 CREATE TRIGGER update_codespace_launches_updated_at
   BEFORE UPDATE ON codespace_launches
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Provisioning tokens for secure API key delivery to Codespaces
+-- Uses one-time token pattern: Launch API creates token, Codespace redeems it
+CREATE TABLE IF NOT EXISTS provisioning_tokens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  token TEXT NOT NULL UNIQUE,
+  launch_id UUID REFERENCES codespace_launches(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  anthropic_api_key TEXT NOT NULL,
+  redeemed BOOLEAN DEFAULT FALSE,
+  redeemed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- No user-facing RLS policies — only accessed via service role from the redemption API
+ALTER TABLE provisioning_tokens ENABLE ROW LEVEL SECURITY;
