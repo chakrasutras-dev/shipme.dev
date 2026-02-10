@@ -7,69 +7,68 @@ export default function AuthCallbackPage() {
   const [status, setStatus] = useState("Completing authentication...");
 
   useEffect(() => {
-    const handleCallback = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
+    // createBrowserClient has detectSessionInUrl: true by default,
+    // so it automatically detects the ?code= parameter and exchanges it.
+    // We just need to listen for the session to be established.
+    const supabase = createClient();
 
-      // Also check hash params (Supabase sometimes uses hash for errors)
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const hashError = hashParams.get("error_description") || hashParams.get("error");
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log("[Callback] Auth state change:", event, !!session);
 
-      if (hashError) {
-        console.error("[Callback] Hash error:", hashError);
-        setStatus("Authentication failed.");
-        window.location.href = `/?error=${encodeURIComponent(hashError)}`;
-        return;
-      }
+        if (event === "SIGNED_IN" && session) {
+          console.log("[Callback] Session established:", session.user?.email);
 
-      if (!code) {
-        console.error("[Callback] No code in URL");
-        setStatus("No authorization code found.");
-        window.location.href = "/?error=no_code";
-        return;
-      }
+          // Store the GitHub provider token in an httpOnly cookie via API
+          if (session.provider_token) {
+            try {
+              await fetch("/api/store-token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ token: session.provider_token }),
+              });
+              console.log("[Callback] Provider token stored");
+            } catch (e) {
+              console.warn("[Callback] Failed to store provider token:", e);
+            }
+          }
 
-      try {
-        const supabase = createClient();
-        console.log("[Callback] Exchanging code for session (client-side)...");
-
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-
-        if (error) {
-          console.error("[Callback] Exchange error:", error);
-          setStatus("Authentication failed.");
-          window.location.href = "/?error=auth_failed";
+          subscription.unsubscribe();
+          setStatus("Authenticated! Launching...");
+          window.location.href = "/?launch=pending";
           return;
         }
 
-        console.log("[Callback] Session established:", !!data.session);
-        console.log("[Callback] User:", data.session?.user?.email);
-
-        // Store the GitHub provider token in an httpOnly cookie via API
-        if (data.session?.provider_token) {
-          try {
-            await fetch("/api/store-token", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({ token: data.session.provider_token }),
-            });
-            console.log("[Callback] Provider token stored");
-          } catch (e) {
-            console.warn("[Callback] Failed to store provider token:", e);
-          }
+        if (event === "TOKEN_REFRESHED") {
+          console.log("[Callback] Token refreshed");
         }
-
-        setStatus("Authenticated! Launching...");
-        window.location.href = "/?launch=pending";
-      } catch (err) {
-        console.error("[Callback] Unexpected error:", err);
-        setStatus("Something went wrong.");
-        window.location.href = "/?error=exchange_failed";
       }
-    };
+    );
 
-    handleCallback();
+    // Also check hash params for errors (Supabase sometimes uses hash)
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const hashError = hashParams.get("error_description") || hashParams.get("error");
+    if (hashError) {
+      console.error("[Callback] Hash error:", hashError);
+      subscription.unsubscribe();
+      setStatus("Authentication failed.");
+      window.location.href = `/?error=${encodeURIComponent(hashError)}`;
+      return;
+    }
+
+    // Timeout fallback - if no auth event after 10 seconds, something went wrong
+    const timeout = setTimeout(() => {
+      console.error("[Callback] Timeout waiting for auth");
+      subscription.unsubscribe();
+      setStatus("Authentication timed out.");
+      window.location.href = "/?error=timeout";
+    }, 10000);
+
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (
