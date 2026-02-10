@@ -17,6 +17,7 @@ export function createClient() {
     supabaseKey!,
     {
       auth: {
+        flowType: 'pkce',
         // IMPORTANT: Disable auto-detection of auth codes in URLs.
         // The /auth/callback page handles code exchange explicitly.
         // Without this, the singleton client auto-exchanges the code

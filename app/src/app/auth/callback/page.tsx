@@ -1,102 +1,154 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
 
 export default function AuthCallbackPage() {
   const [status, setStatus] = useState("Completing authentication...");
+  const [debugInfo, setDebugInfo] = useState("");
 
   useEffect(() => {
     const handleCallback = async () => {
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
 
-      // Check for errors in hash (Supabase error redirects)
+      // Check for errors in hash
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const hashError =
         hashParams.get("error_description") || hashParams.get("error");
 
       if (hashError) {
-        console.error("[Callback] Error in hash:", hashError);
         setStatus("Authentication failed.");
-        window.location.href = `/?error=${encodeURIComponent(hashError)}`;
+        setDebugInfo(`Hash error: ${hashError}`);
+        setTimeout(() => {
+          window.location.href = `/?error=${encodeURIComponent(hashError)}`;
+        }, 5000);
         return;
       }
 
       if (!code) {
-        console.error("[Callback] No code found in URL");
         setStatus("No authorization code found.");
-        window.location.href = "/?error=no_code";
+        setDebugInfo("No ?code= parameter in URL");
+        setTimeout(() => {
+          window.location.href = "/?error=no_code";
+        }, 5000);
         return;
       }
 
-      // Debug: log all cookies
+      // Read all cookies and find the code verifier
       const allCookies = document.cookie;
-      console.log("[Callback] All cookies:", allCookies);
-      console.log("[Callback] Code:", code);
+      const cookieList = allCookies.split(";").map((c) => c.trim());
+      const codeVerifierCookie = cookieList.find((c) =>
+        c.includes("code-verifier")
+      );
 
-      // Check for code verifier
-      const codeVerifierCookie = document.cookie
-        .split(";")
-        .find((c) => c.trim().includes("code-verifier"));
-      console.log("[Callback] Code verifier cookie:", codeVerifierCookie?.trim() || "NOT FOUND");
+      let codeVerifier: string | null = null;
+      if (codeVerifierCookie) {
+        // Cookie format: name=value
+        const eqIndex = codeVerifierCookie.indexOf("=");
+        codeVerifier = codeVerifierCookie.substring(eqIndex + 1);
+      }
+
+      const debugStr = [
+        `Code: ${code.substring(0, 8)}...`,
+        `Cookies: ${cookieList.length}`,
+        `Code verifier found: ${!!codeVerifier}`,
+        `Code verifier length: ${codeVerifier?.length || 0}`,
+        `Cookie names: ${cookieList.map((c) => c.split("=")[0]).join(", ")}`,
+      ].join("\n");
+
+      console.log("[Callback] Debug info:\n", debugStr);
+      setDebugInfo(debugStr);
+
+      if (!codeVerifier) {
+        setStatus("Code verifier not found in cookies!");
+        setTimeout(() => {
+          window.location.href = "/?error=no_code_verifier";
+        }, 10000);
+        return;
+      }
+
+      // Call Supabase token endpoint DIRECTLY (bypass @supabase/ssr)
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
       try {
-        // Create a fresh, non-singleton client with auto-detection DISABLED
-        // to prevent any race conditions with auto-exchange.
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        setStatus("Exchanging code for session (direct API call)...");
+
+        const response = await fetch(
+          `${supabaseUrl}/auth/v1/token?grant_type=pkce`,
           {
-            isSingleton: false,
-            auth: {
-              detectSessionInUrl: false,
-              flowType: "pkce",
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: supabaseKey!,
+              Authorization: `Bearer ${supabaseKey}`,
             },
+            body: JSON.stringify({
+              auth_code: code,
+              code_verifier: codeVerifier,
+            }),
           }
         );
 
-        console.log("[Callback] Exchanging code for session...");
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        const result = await response.json();
+        console.log("[Callback] Token response status:", response.status);
+        console.log("[Callback] Token response:", JSON.stringify(result, null, 2));
 
-        if (error) {
-          console.error("[Callback] Exchange error:", error.message);
-          console.error("[Callback] Exchange error details:", JSON.stringify(error));
-          setStatus(`Exchange failed: ${error.message}`);
-          // Show error on page instead of redirecting immediately
+        if (!response.ok) {
+          setStatus(`Exchange failed: ${result.error_description || result.error || result.msg || "Unknown error"}`);
+          setDebugInfo(
+            `${debugStr}\n\nAPI Error (${response.status}): ${JSON.stringify(result)}`
+          );
           setTimeout(() => {
-            window.location.href = `/?error=${encodeURIComponent(error.message)}`;
-          }, 3000);
+            window.location.href = `/?error=${encodeURIComponent(result.error_description || result.error || "exchange_failed")}`;
+          }, 10000);
           return;
         }
 
-        console.log("[Callback] Session established:", !!data.session);
-        console.log("[Callback] User:", data.session?.user?.email);
-        console.log("[Callback] Provider token:", !!data.session?.provider_token);
+        // Success! Now store the session using the browser Supabase client
+        const { createBrowserClient } = await import("@supabase/ssr");
+        const supabase = createBrowserClient(supabaseUrl!, supabaseKey!, {
+          isSingleton: false,
+          auth: { detectSessionInUrl: false, flowType: "pkce" },
+        });
 
-        // Store the GitHub provider token in an httpOnly cookie via API
-        if (data.session?.provider_token) {
+        // Set the session manually
+        const { error: setError } = await supabase.auth.setSession({
+          access_token: result.access_token,
+          refresh_token: result.refresh_token,
+        });
+
+        if (setError) {
+          console.error("[Callback] setSession error:", setError);
+          setStatus(`Session storage failed: ${setError.message}`);
+          return;
+        }
+
+        console.log("[Callback] Session established successfully!");
+
+        // Store the GitHub provider token
+        if (result.provider_token) {
           try {
             await fetch("/api/store-token", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "include",
-              body: JSON.stringify({ token: data.session.provider_token }),
+              body: JSON.stringify({ token: result.provider_token }),
             });
-            console.log("[Callback] Provider token stored");
           } catch (e) {
             console.warn("[Callback] Failed to store provider token:", e);
           }
         }
+
+        // Clean up the code verifier cookie
+        document.cookie = `${codeVerifierCookie!.split("=")[0]}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
 
         setStatus("Authenticated! Launching...");
         window.location.href = "/?launch=pending";
       } catch (err: any) {
         console.error("[Callback] Unexpected error:", err);
         setStatus(`Error: ${err.message}`);
-        setTimeout(() => {
-          window.location.href = `/?error=${encodeURIComponent(err.message)}`;
-        }, 3000);
+        setDebugInfo(`${debugStr}\n\nError: ${err.message}`);
       }
     };
 
@@ -105,10 +157,14 @@ export default function AuthCallbackPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-      <div className="text-center">
+      <div className="text-center max-w-lg mx-auto px-4">
         <div className="w-8 h-8 border-2 border-[#00f5ff] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-white text-lg">{status}</p>
-        <p className="text-slate-500 text-sm mt-2">Check browser console for details</p>
+        <p className="text-white text-lg mb-4">{status}</p>
+        {debugInfo && (
+          <pre className="text-left text-xs text-slate-400 bg-slate-900 p-4 rounded-lg whitespace-pre-wrap break-all">
+            {debugInfo}
+          </pre>
+        )}
       </div>
     </div>
   );
