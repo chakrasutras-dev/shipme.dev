@@ -14,6 +14,16 @@ export function createClient() {
 
   return createBrowserClient(
     supabaseUrl!,
-    supabaseKey!
+    supabaseKey!,
+    {
+      auth: {
+        // IMPORTANT: Disable auto-detection of auth codes in URLs.
+        // The /auth/callback page handles code exchange explicitly.
+        // Without this, the singleton client auto-exchanges the code
+        // when any module imports it on the callback page, consuming
+        // the code before the callback page can use it.
+        detectSessionInUrl: false,
+      },
+    }
   )
 }
