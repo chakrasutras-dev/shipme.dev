@@ -11,16 +11,19 @@ export default function AuthCallbackPage() {
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
 
-      // Check for errors in hash
+      // Check for errors in both query params and hash
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const hashError =
-        hashParams.get("error_description") || hashParams.get("error");
+      const error =
+        params.get("error_description") ||
+        params.get("error") ||
+        hashParams.get("error_description") ||
+        hashParams.get("error");
 
-      if (hashError) {
+      if (error) {
         setStatus("Authentication failed.");
-        setDebugInfo(`Hash error: ${hashError}`);
+        setDebugInfo(`Error: ${error}`);
         setTimeout(() => {
-          window.location.href = `/?error=${encodeURIComponent(hashError)}`;
+          window.location.href = `/?error=${encodeURIComponent(error)}`;
         }, 5000);
         return;
       }
@@ -34,121 +37,57 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      // Read all cookies and find the code verifier
-      const allCookies = document.cookie;
-      const cookieList = allCookies.split(";").map((c) => c.trim());
-      const codeVerifierCookie = cookieList.find((c) =>
-        c.includes("code-verifier")
-      );
-
-      let codeVerifier: string | null = null;
-      if (codeVerifierCookie) {
-        // Cookie format: name=value
-        const eqIndex = codeVerifierCookie.indexOf("=");
-        codeVerifier = codeVerifierCookie.substring(eqIndex + 1);
-      }
-
-      const debugStr = [
-        `Code: ${code.substring(0, 8)}...`,
-        `Cookies: ${cookieList.length}`,
-        `Code verifier found: ${!!codeVerifier}`,
-        `Code verifier length: ${codeVerifier?.length || 0}`,
-        `Cookie names: ${cookieList.map((c) => c.split("=")[0]).join(", ")}`,
-      ].join("\n");
-
-      console.log("[Callback] Debug info:\n", debugStr);
-      setDebugInfo(debugStr);
-
-      if (!codeVerifier) {
-        setStatus("Code verifier not found in cookies!");
-        setTimeout(() => {
-          window.location.href = "/?error=no_code_verifier";
-        }, 10000);
-        return;
-      }
-
-      // Call Supabase token endpoint DIRECTLY (bypass @supabase/ssr)
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
       try {
-        setStatus("Exchanging code for session (direct API call)...");
+        setStatus("Exchanging code for session...");
 
-        const response = await fetch(
-          `${supabaseUrl}/auth/v1/token?grant_type=pkce`,
+        // Use a fresh, non-singleton Supabase client for the exchange.
+        // The library knows how to read its own cookie-stored code verifier
+        // (including proper URL-decoding), so we don't need to parse it manually.
+        const { createBrowserClient } = await import("@supabase/ssr");
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
           {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: supabaseKey!,
-              Authorization: `Bearer ${supabaseKey}`,
-            },
-            body: JSON.stringify({
-              auth_code: code,
-              code_verifier: codeVerifier,
-            }),
+            isSingleton: false,
+            auth: { detectSessionInUrl: false, flowType: "pkce" },
           }
         );
 
-        const result = await response.json();
-        console.log("[Callback] Token response status:", response.status);
-        console.log("[Callback] Token response:", JSON.stringify(result, null, 2));
+        const { data, error: exchangeError } =
+          await supabase.auth.exchangeCodeForSession(code);
 
-        if (!response.ok) {
-          setStatus(`Exchange failed: ${result.error_description || result.error || result.msg || "Unknown error"}`);
-          setDebugInfo(
-            `${debugStr}\n\nAPI Error (${response.status}): ${JSON.stringify(result)}`
-          );
+        if (exchangeError) {
+          console.error("[Callback] Exchange error:", exchangeError);
+          setStatus(`Exchange failed: ${exchangeError.message}`);
+          setDebugInfo(`Error: ${exchangeError.message}`);
           setTimeout(() => {
-            window.location.href = `/?error=${encodeURIComponent(result.error_description || result.error || "exchange_failed")}`;
+            window.location.href = `/?error=${encodeURIComponent(exchangeError.message)}`;
           }, 10000);
-          return;
-        }
-
-        // Success! Now store the session using the browser Supabase client
-        const { createBrowserClient } = await import("@supabase/ssr");
-        const supabase = createBrowserClient(supabaseUrl!, supabaseKey!, {
-          isSingleton: false,
-          auth: { detectSessionInUrl: false, flowType: "pkce" },
-        });
-
-        // Set the session manually
-        const { error: setError } = await supabase.auth.setSession({
-          access_token: result.access_token,
-          refresh_token: result.refresh_token,
-        });
-
-        if (setError) {
-          console.error("[Callback] setSession error:", setError);
-          setStatus(`Session storage failed: ${setError.message}`);
           return;
         }
 
         console.log("[Callback] Session established successfully!");
 
-        // Store the GitHub provider token
-        if (result.provider_token) {
+        // Store the GitHub provider token as an httpOnly cookie
+        if (data.session?.provider_token) {
           try {
             await fetch("/api/store-token", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "include",
-              body: JSON.stringify({ token: result.provider_token }),
+              body: JSON.stringify({ token: data.session.provider_token }),
             });
           } catch (e) {
             console.warn("[Callback] Failed to store provider token:", e);
           }
         }
 
-        // Clean up the code verifier cookie
-        document.cookie = `${codeVerifierCookie!.split("=")[0]}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-
         setStatus("Authenticated! Launching...");
         window.location.href = "/?launch=pending";
       } catch (err: any) {
         console.error("[Callback] Unexpected error:", err);
         setStatus(`Error: ${err.message}`);
-        setDebugInfo(`${debugStr}\n\nError: ${err.message}`);
+        setDebugInfo(`Error: ${err.message}`);
       }
     };
 
