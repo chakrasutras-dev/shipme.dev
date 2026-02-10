@@ -96,6 +96,25 @@ export default function LandingPage() {
     checkPendingLaunch();
   }, []);
 
+  const triggerGitHubOAuth = async (launchData: any) => {
+    // Store launch data + UI state before OAuth redirect
+    localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
+    localStorage.setItem('pendingProjectIdea', projectIdea);
+    if (recommendedStack) {
+      localStorage.setItem('pendingRecommendedStack', JSON.stringify(recommendedStack));
+    }
+    console.log('[Launch] Triggering GitHub OAuth...');
+    const { error } = await signInWithGitHub();
+    if (error) {
+      console.error("GitHub auth failed:", error);
+      alert("GitHub authentication failed. Please try again.");
+      localStorage.removeItem('pendingCodespaceLaunch');
+      localStorage.removeItem('pendingProjectIdea');
+      localStorage.removeItem('pendingRecommendedStack');
+      setIsLaunching(false);
+    }
+  };
+
   const launchCodespace = async (launchData: any) => {
     setIsLaunching(true);
     try {
@@ -114,13 +133,14 @@ export default function LandingPage() {
         if (result.codespace_url) {
           window.open(result.codespace_url, '_blank');
         }
+      } else if (response.status === 401) {
+        // Auth or GitHub token missing — re-trigger GitHub OAuth
+        console.log("[Launch] 401 received, re-triggering GitHub OAuth");
+        await triggerGitHubOAuth(launchData);
+        return; // Don't setIsLaunching(false) — OAuth redirect will navigate away
       } else {
         console.error("Launch failed:", result);
-        // Show debug info if available
-        const debugInfo = result.debug
-          ? `\n\nDebug: ${result.debug.cookieCount} cookies [${(result.debug.cookieNames || []).join(', ')}], error: ${result.debug.authError}`
-          : '';
-        alert(`Failed to launch: ${result.error || 'Unknown error'}${debugInfo}`);
+        alert(`Failed to launch: ${result.error || 'Unknown error'}`);
       }
     } catch (err) {
       console.error("Launch error:", err);
@@ -147,26 +167,12 @@ export default function LandingPage() {
       };
 
       if (session) {
+        // Has Supabase session — try launching directly.
+        // If GitHub token is missing, launchCodespace will auto-trigger OAuth.
         await launchCodespace(launchData);
       } else {
-        // Store launch data + UI state in localStorage before OAuth redirect
-        // localStorage persists on the same origin (shipme.dev → GitHub → Supabase → shipme.dev)
-        localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
-        localStorage.setItem('pendingProjectIdea', projectIdea);
-        if (recommendedStack) {
-          localStorage.setItem('pendingRecommendedStack', JSON.stringify(recommendedStack));
-        }
-        console.log('[Launch] Stored in localStorage, origin:', window.location.origin);
-
-        const { error } = await signInWithGitHub();
-        if (error) {
-          console.error("GitHub auth failed:", error);
-          alert("GitHub authentication failed. Please try again.");
-          localStorage.removeItem('pendingCodespaceLaunch');
-          localStorage.removeItem('pendingProjectIdea');
-          localStorage.removeItem('pendingRecommendedStack');
-          setIsLaunching(false);
-        }
+        // No session at all — trigger GitHub OAuth
+        await triggerGitHubOAuth(launchData);
       }
     } catch (err) {
       console.error("Launch error:", err);
