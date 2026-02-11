@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 
-// POST: Redeem a one-time provisioning token to receive the Anthropic API key.
+// POST: Redeem a one-time provisioning token to receive ALL credentials.
 // Called from a Codespace's post-create.sh — no user auth (uses service role).
 export async function POST(request: Request) {
   try {
@@ -13,10 +13,10 @@ export async function POST(request: Request) {
 
     const supabase = createServiceRoleClient()
 
-    // Find the token
+    // Find the token (select all credential columns)
     const { data, error } = await supabase
       .from('provisioning_tokens')
-      .select('id, anthropic_api_key, redeemed, expires_at')
+      .select('id, anthropic_api_key, supabase_access_token, netlify_auth_token, github_token, redeemed, expires_at')
       .eq('token', token)
       .single()
 
@@ -40,9 +40,13 @@ export async function POST(request: Request) {
       .update({ redeemed: true, redeemed_at: new Date().toISOString() })
       .eq('id', data.id)
 
+    // Return ALL available credentials
     return NextResponse.json({
       success: true,
-      anthropic_api_key: data.anthropic_api_key
+      anthropic_api_key: data.anthropic_api_key,
+      supabase_access_token: data.supabase_access_token || null,
+      netlify_auth_token: data.netlify_auth_token || null,
+      github_token: data.github_token || null
     })
   } catch (err) {
     console.error('[ProvisioningToken] Redemption error:', err)

@@ -284,3 +284,42 @@ CREATE TABLE IF NOT EXISTS provisioning_tokens (
 
 -- No user-facing RLS policies — only accessed via service role from the redemption API
 ALTER TABLE provisioning_tokens ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- Phase 2: OAuth Token Storage + Extended Provisioning
+-- ============================================================================
+
+-- Store user's OAuth tokens from Supabase and Netlify
+-- Collected on shipme.dev BEFORE launching Codespace
+CREATE TABLE IF NOT EXISTS user_oauth_tokens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  provider TEXT NOT NULL,  -- 'supabase', 'netlify'
+  access_token TEXT NOT NULL,
+  refresh_token TEXT,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, provider)
+);
+
+ALTER TABLE user_oauth_tokens ENABLE ROW LEVEL SECURITY;
+
+-- Users can read their own tokens (for checking connection status)
+CREATE POLICY "Users can view own oauth tokens"
+  ON user_oauth_tokens FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- Service role handles inserts/updates (from OAuth callback)
+-- No user-facing INSERT/UPDATE policies needed
+
+-- Trigger for updated_at
+CREATE TRIGGER update_user_oauth_tokens_updated_at
+  BEFORE UPDATE ON user_oauth_tokens
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Extend provisioning_tokens to carry all tokens (not just Anthropic)
+ALTER TABLE provisioning_tokens
+  ADD COLUMN IF NOT EXISTS supabase_access_token TEXT,
+  ADD COLUMN IF NOT EXISTS netlify_auth_token TEXT,
+  ADD COLUMN IF NOT EXISTS github_token TEXT;

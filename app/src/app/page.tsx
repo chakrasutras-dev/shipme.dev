@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { ArrowRight, Github, Zap, Shield, Terminal, Rocket, Sparkles } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { ArrowRight, Github, Zap, Shield, Terminal, Rocket, Sparkles, Check, ExternalLink } from "lucide-react";
 import { signInWithGitHub, getSession } from "@/lib/auth/supabase-auth";
+
+type ConnectedAccounts = {
+  github: boolean;
+  supabase: boolean;
+  netlify: boolean;
+};
 
 export default function LandingPage() {
   const [projectIdea, setProjectIdea] = useState("");
@@ -11,6 +17,30 @@ export default function LandingPage() {
   const [recommendedStack, setRecommendedStack] = useState<any>(null);
   const [isLaunching, setIsLaunching] = useState(false);
   const [launchResult, setLaunchResult] = useState<any>(null);
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccounts>({
+    github: false,
+    supabase: false,
+    netlify: false,
+  });
+  const [isCheckingAccounts, setIsCheckingAccounts] = useState(false);
+
+  const allConnected = connectedAccounts.github && connectedAccounts.supabase && connectedAccounts.netlify;
+
+  // Fetch connected accounts status
+  const fetchConnectedAccounts = useCallback(async () => {
+    try {
+      setIsCheckingAccounts(true);
+      const res = await fetch("/api/connected-accounts", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setConnectedAccounts(data.accounts);
+      }
+    } catch (err) {
+      console.error("Failed to check connected accounts:", err);
+    } finally {
+      setIsCheckingAccounts(false);
+    }
+  }, []);
 
   const handleAnalyzeIdea = async () => {
     if (!projectIdea.trim()) return;
@@ -26,6 +56,8 @@ export default function LandingPage() {
       if (response.ok) {
         const data = await response.json();
         setRecommendedStack(data);
+        // Check connected accounts once we have a stack recommendation
+        fetchConnectedAccounts();
       }
     } catch (error) {
       console.error("Analysis failed:", error);
@@ -34,83 +66,121 @@ export default function LandingPage() {
     }
   };
 
-  // Check for pending launch after OAuth redirect
+  // Handle OAuth success/error params AND pending launch after GitHub OAuth
   useEffect(() => {
-    const checkPendingLaunch = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const shouldLaunch = urlParams.get('launch') === 'pending';
-      const hasError = urlParams.get('error');
+    const urlParams = new URLSearchParams(window.location.search);
 
-      if (hasError) {
-        alert(`Authentication failed: ${hasError}. Please try again.`);
-        window.history.replaceState({}, '', '/');
-        return;
-      }
+    // Handle OAuth success (Supabase/Netlify connect)
+    const oauthSuccess = urlParams.get("oauth_success");
+    const oauthError = urlParams.get("oauth_error");
 
-      if (!shouldLaunch) return;
+    if (oauthSuccess || oauthError) {
+      // Clean URL
+      window.history.replaceState({}, "", "/");
 
-      setIsLaunching(true);
-      window.history.replaceState({}, '', '/');
+      // Restore UI state from before OAuth redirect
+      const savedIdea = localStorage.getItem("pendingProjectIdea");
+      const savedStack = localStorage.getItem("pendingRecommendedStack");
+      const savedRepo = localStorage.getItem("pendingRepoName");
 
-      // Restore UI state that was saved before OAuth redirect
-      const savedIdea = localStorage.getItem('pendingProjectIdea');
-      const savedStack = localStorage.getItem('pendingRecommendedStack');
       if (savedIdea) {
         setProjectIdea(savedIdea);
-        localStorage.removeItem('pendingProjectIdea');
+        localStorage.removeItem("pendingProjectIdea");
       }
       if (savedStack) {
-        try {
-          setRecommendedStack(JSON.parse(savedStack));
-        } catch {}
-        localStorage.removeItem('pendingRecommendedStack');
+        try { setRecommendedStack(JSON.parse(savedStack)); } catch {}
+        localStorage.removeItem("pendingRecommendedStack");
+      }
+      if (savedRepo) {
+        setRepoName(savedRepo);
+        localStorage.removeItem("pendingRepoName");
       }
 
-      // Read launch data from localStorage (stored before OAuth redirect)
-      const stored = localStorage.getItem('pendingCodespaceLaunch');
-      localStorage.removeItem('pendingCodespaceLaunch');
-
-      if (!stored) {
-        console.error('[Launch] No launch data in localStorage');
-        alert('Launch data was lost. Please try again.');
-        setIsLaunching(false);
-        return;
+      if (oauthError) {
+        alert(`OAuth connection failed: ${oauthError}`);
       }
 
-      let launchData;
-      try {
-        launchData = JSON.parse(stored);
-        console.log('[Launch] Got launch data from localStorage:', launchData);
-      } catch (e) {
-        console.error('[Launch] Failed to parse launch data:', e);
-        alert('Launch data was corrupted. Please try again.');
-        setIsLaunching(false);
-        return;
-      }
+      // Refresh connected accounts
+      fetchConnectedAccounts();
+      return;
+    }
 
-      // Call the launch API - it checks auth server-side via cookies
-      console.log('[Launch] Calling launch API directly...');
-      await launchCodespace(launchData);
-    };
+    // Handle pending launch after GitHub OAuth redirect
+    const shouldLaunch = urlParams.get("launch") === "pending";
+    const hasError = urlParams.get("error");
 
-    checkPendingLaunch();
+    if (hasError) {
+      alert(`Authentication failed: ${hasError}. Please try again.`);
+      window.history.replaceState({}, "", "/");
+      return;
+    }
+
+    if (!shouldLaunch) return;
+
+    setIsLaunching(true);
+    window.history.replaceState({}, "", "/");
+
+    // Restore UI state
+    const savedIdea = localStorage.getItem("pendingProjectIdea");
+    const savedStack = localStorage.getItem("pendingRecommendedStack");
+    if (savedIdea) {
+      setProjectIdea(savedIdea);
+      localStorage.removeItem("pendingProjectIdea");
+    }
+    if (savedStack) {
+      try { setRecommendedStack(JSON.parse(savedStack)); } catch {}
+      localStorage.removeItem("pendingRecommendedStack");
+    }
+
+    // Read launch data
+    const stored = localStorage.getItem("pendingCodespaceLaunch");
+    localStorage.removeItem("pendingCodespaceLaunch");
+
+    if (!stored) {
+      alert("Launch data was lost. Please try again.");
+      setIsLaunching(false);
+      return;
+    }
+
+    let launchData;
+    try {
+      launchData = JSON.parse(stored);
+    } catch {
+      alert("Launch data was corrupted. Please try again.");
+      setIsLaunching(false);
+      return;
+    }
+
+    launchCodespace(launchData);
   }, []);
 
-  const triggerGitHubOAuth = async (launchData: any) => {
-    // Store launch data + UI state before OAuth redirect
-    localStorage.setItem('pendingCodespaceLaunch', JSON.stringify(launchData));
-    localStorage.setItem('pendingProjectIdea', projectIdea);
+  // Connect Supabase or Netlify (OAuth redirect)
+  const connectProvider = (provider: "supabase" | "netlify") => {
+    // Save UI state before redirect
+    localStorage.setItem("pendingProjectIdea", projectIdea);
     if (recommendedStack) {
-      localStorage.setItem('pendingRecommendedStack', JSON.stringify(recommendedStack));
+      localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
     }
-    console.log('[Launch] Triggering GitHub OAuth...');
+    if (repoName) {
+      localStorage.setItem("pendingRepoName", repoName);
+    }
+    // Redirect to OAuth start
+    window.location.href = `/api/oauth/start?provider=${provider}`;
+  };
+
+  const triggerGitHubOAuth = async (launchData: any) => {
+    localStorage.setItem("pendingCodespaceLaunch", JSON.stringify(launchData));
+    localStorage.setItem("pendingProjectIdea", projectIdea);
+    if (recommendedStack) {
+      localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
+    }
     const { error } = await signInWithGitHub();
     if (error) {
       console.error("GitHub auth failed:", error);
       alert("GitHub authentication failed. Please try again.");
-      localStorage.removeItem('pendingCodespaceLaunch');
-      localStorage.removeItem('pendingProjectIdea');
-      localStorage.removeItem('pendingRecommendedStack');
+      localStorage.removeItem("pendingCodespaceLaunch");
+      localStorage.removeItem("pendingProjectIdea");
+      localStorage.removeItem("pendingRecommendedStack");
       setIsLaunching(false);
     }
   };
@@ -129,18 +199,15 @@ export default function LandingPage() {
 
       if (response.ok && result.success) {
         setLaunchResult(result);
-        // Open Codespace in new tab
         if (result.codespace_url) {
-          window.open(result.codespace_url, '_blank');
+          window.open(result.codespace_url, "_blank");
         }
       } else if (response.status === 401) {
-        // Auth or GitHub token missing — re-trigger GitHub OAuth
-        console.log("[Launch] 401 received, re-triggering GitHub OAuth");
         await triggerGitHubOAuth(launchData);
-        return; // Don't setIsLaunching(false) — OAuth redirect will navigate away
+        return;
       } else {
         console.error("Launch failed:", result);
-        alert(`Failed to launch: ${result.error || 'Unknown error'}`);
+        alert(`Failed to launch: ${result.error || "Unknown error"}`);
       }
     } catch (err) {
       console.error("Launch error:", err);
@@ -152,26 +219,21 @@ export default function LandingPage() {
 
   const handleLaunchCodespace = async () => {
     setIsLaunching(true);
-
     try {
       const session = await getSession();
-
       const finalRepoName = repoName.trim()
-        ? repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-')
-        : projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        ? repoName.toLowerCase().replace(/[^a-z0-9-]/g, "-")
+        : projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
       const launchData = {
         projectName: finalRepoName,
         description: projectIdea,
-        stack: recommendedStack?.recommendation?.stack || {}
+        stack: recommendedStack?.recommendation?.stack || {},
       };
 
       if (session) {
-        // Has Supabase session — try launching directly.
-        // If GitHub token is missing, launchCodespace will auto-trigger OAuth.
         await launchCodespace(launchData);
       } else {
-        // No session at all — trigger GitHub OAuth
         await triggerGitHubOAuth(launchData);
       }
     } catch (err) {
@@ -181,8 +243,7 @@ export default function LandingPage() {
     }
   };
 
-  // Show full-page launching state when auto-launching after OAuth redirect
-  // (covers the case where recommendedStack wasn't restored from localStorage)
+  // Full-page launching state
   if (isLaunching && !recommendedStack) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
@@ -306,8 +367,10 @@ export default function LandingPage() {
                       <span className="text-[#FF00FF] font-semibold">Hosting:</span> {recommendedStack.recommendation?.stack?.hosting || "Netlify"}
                     </p>
                   </div>
+
                   {!launchResult ? (
                     <>
+                      {/* Repository Name */}
                       <div className="mb-4">
                         <label htmlFor="repoName" className="block text-sm font-medium text-slate-300 mb-2">
                           Repository Name (optional)
@@ -324,15 +387,104 @@ export default function LandingPage() {
                           Leave empty to auto-generate from your project description
                         </p>
                       </div>
+
+                      {/* Connect Accounts */}
+                      <div className="mb-4 p-4 bg-white/5 border border-white/10 rounded-xl">
+                        <h4 className="text-sm font-bold text-white mb-3 font-['Syne']">Connect Your Accounts</h4>
+                        <p className="text-xs text-slate-400 mb-3">
+                          Connect these services so Claude Code can provision your infrastructure automatically.
+                        </p>
+                        <div className="space-y-2">
+                          {/* GitHub */}
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-white/5">
+                            <div className="flex items-center gap-3">
+                              <Github className="w-5 h-5 text-white" />
+                              <span className="text-sm text-white">GitHub</span>
+                            </div>
+                            {connectedAccounts.github ? (
+                              <span className="flex items-center gap-1 text-xs text-emerald-400">
+                                <Check className="w-4 h-4" /> Connected
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400">Connects on launch</span>
+                            )}
+                          </div>
+
+                          {/* Supabase */}
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-white/5">
+                            <div className="flex items-center gap-3">
+                              <svg className="w-5 h-5" viewBox="0 0 109 113" fill="none">
+                                <path d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627L99.1935 40.0627C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z" fill="url(#sb1)"/>
+                                <path d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627L99.1935 40.0627C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z" fill="url(#sb2)" fillOpacity="0.2"/>
+                                <path d="M45.317 2.07103C48.1765 -1.53037 53.9745 0.442937 54.0434 5.041L54.4849 72.2922H9.83113C1.64038 72.2922 -2.92775 62.8321 2.1655 56.4175L45.317 2.07103Z" fill="#3ECF8E"/>
+                                <defs>
+                                  <linearGradient id="sb1" x1="53.9738" y1="54.974" x2="94.1635" y2="71.8295" gradientUnits="userSpaceOnUse">
+                                    <stop stopColor="#249361"/><stop offset="1" stopColor="#3ECF8E"/>
+                                  </linearGradient>
+                                  <linearGradient id="sb2" x1="36.1558" y1="30.578" x2="54.4844" y2="65.0806" gradientUnits="userSpaceOnUse">
+                                    <stop/><stop offset="1" stopOpacity="0"/>
+                                  </linearGradient>
+                                </defs>
+                              </svg>
+                              <span className="text-sm text-white">Supabase</span>
+                            </div>
+                            {connectedAccounts.supabase ? (
+                              <span className="flex items-center gap-1 text-xs text-emerald-400">
+                                <Check className="w-4 h-4" /> Connected
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => connectProvider("supabase")}
+                                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors border border-emerald-500/30"
+                              >
+                                Connect <ExternalLink className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Netlify */}
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-white/5">
+                            <div className="flex items-center gap-3">
+                              <svg className="w-5 h-5" viewBox="0 0 256 256" fill="none">
+                                <path d="M128 0L256 128L128 256L0 128L128 0Z" fill="#00C7B7"/>
+                              </svg>
+                              <span className="text-sm text-white">Netlify</span>
+                            </div>
+                            {connectedAccounts.netlify ? (
+                              <span className="flex items-center gap-1 text-xs text-emerald-400">
+                                <Check className="w-4 h-4" /> Connected
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => connectProvider("netlify")}
+                                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[#00C7B7]/20 text-[#00C7B7] rounded-lg hover:bg-[#00C7B7]/30 transition-colors border border-[#00C7B7]/30"
+                              >
+                                Connect <ExternalLink className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {isCheckingAccounts && (
+                          <p className="text-xs text-slate-500 mt-2 text-center">Checking connections...</p>
+                        )}
+                      </div>
+
+                      {/* Launch Button */}
                       <button
                         onClick={handleLaunchCodespace}
-                        disabled={isLaunching}
+                        disabled={isLaunching || !allConnected}
                         className="w-full px-8 py-4 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] rounded-xl font-semibold text-slate-950 hover:shadow-xl hover:shadow-[#00f5ff]/30 transition-all flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isLaunching ? (
                           <>
                             <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
                             Launching Codespace...
+                          </>
+                        ) : !allConnected ? (
+                          <>
+                            <Shield className="w-5 h-5" />
+                            Connect All Accounts to Launch
                           </>
                         ) : (
                           <>
@@ -343,12 +495,14 @@ export default function LandingPage() {
                         )}
                       </button>
                       <p className="text-xs text-slate-500 mt-2 text-center">
-                        Opens GitHub Codespace with Claude Code ready to provision your infrastructure
+                        {allConnected
+                          ? "Opens GitHub Codespace with Claude Code ready to provision your infrastructure"
+                          : "Connect all three services above to enable zero-touch provisioning"}
                       </p>
                     </>
                   ) : (
                     <div className="mt-4 p-4 bg-[#00f5ff]/10 border border-[#00f5ff]/30 rounded-xl">
-                      <p className="text-white font-semibold mb-2">🚀 Codespace Launched!</p>
+                      <p className="text-white font-semibold mb-2">Codespace Launched!</p>
                       <p className="text-sm text-slate-300 mb-3">Your development environment is ready</p>
                       <a
                         href={launchResult.codespace_url}
@@ -420,7 +574,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-white/5 py-8 px-6 mt-20">
         <div className="max-w-6xl mx-auto text-center text-sm text-slate-500">
-          <p>© 2026 ShipMe v2.0 • Built by Ayan Putatunda</p>
+          <p>&copy; 2026 ShipMe v2.0 &bull; Built by Ayan Putatunda</p>
         </div>
       </footer>
     </div>

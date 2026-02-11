@@ -103,28 +103,48 @@ export async function POST(request: Request) {
     // Wait for repository to be ready (GitHub template creation is async)
     await new Promise(resolve => setTimeout(resolve, 3000))
 
-    // Generate a one-time provisioning token for API key delivery.
-    // The Codespace's post-create.sh will redeem this token to receive
-    // ShipMe's Anthropic API key for Claude Code.
+    // Generate a one-time provisioning token for ALL credential delivery.
+    // The Codespace's post-create.sh will redeem this token to receive:
+    // - ShipMe's Anthropic API key (for Claude Code)
+    // - User's Supabase Management API token (for creating projects)
+    // - User's Netlify API token (for deploying sites)
+    // - User's GitHub token (from the OAuth session)
+    const serviceClient = createServiceRoleClient()
     let provisioningToken: string | undefined
+
     const hasShipmeKey = !!process.env.SHIPME_ANTHROPIC_API_KEY
     console.log('[Launch] SHIPME_ANTHROPIC_API_KEY present:', hasShipmeKey)
     console.log('[Launch] Supabase user ID:', user!.id)
+
+    // Fetch user's OAuth tokens (Supabase + Netlify) from DB
+    const { data: oauthTokens } = await serviceClient
+      .from('user_oauth_tokens')
+      .select('provider, access_token')
+      .eq('user_id', user!.id)
+
+    const supabaseToken = oauthTokens?.find(t => t.provider === 'supabase')?.access_token || null
+    const netlifyToken = oauthTokens?.find(t => t.provider === 'netlify')?.access_token || null
+    console.log('[Launch] Supabase token available:', !!supabaseToken)
+    console.log('[Launch] Netlify token available:', !!netlifyToken)
+    console.log('[Launch] GitHub token available:', !!githubToken)
+
     if (hasShipmeKey) {
       provisioningToken = crypto.randomUUID()
       console.log('[Launch] Generated provisioning token:', provisioningToken)
-      const serviceClient = createServiceRoleClient()
       const { error: tokenError } = await serviceClient.from('provisioning_tokens').insert({
         token: provisioningToken,
-        user_id: user!.id, // Supabase auth user ID (UUID)
+        user_id: user!.id,
         anthropic_api_key: process.env.SHIPME_ANTHROPIC_API_KEY,
-        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min TTL
+        supabase_access_token: supabaseToken,
+        netlify_auth_token: netlifyToken,
+        github_token: githubToken,
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
       })
       if (tokenError) {
         console.error('[Launch] Failed to store provisioning token:', JSON.stringify(tokenError))
-        provisioningToken = undefined // Don't inject a token that's not in the DB
+        provisioningToken = undefined
       } else {
-        console.log('[Launch] Provisioning token stored successfully')
+        console.log('[Launch] Provisioning token stored with all credentials')
       }
     } else {
       console.log('[Launch] SHIPME_ANTHROPIC_API_KEY is not set, skipping provisioning token')

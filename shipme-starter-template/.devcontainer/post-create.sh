@@ -62,13 +62,12 @@ cat > "$HOME/.claude.json" << 'CEOF'
 CEOF
 echo "  Claude Code onboarding pre-configured."
 
-# Step 6: Configure Anthropic API key via provisioning token
-echo "[5/5] Configuring Claude Code..."
+# Step 6: Retrieve ALL credentials via provisioning token
+echo "[5/5] Configuring credentials..."
 
-if [ -n "$ANTHROPIC_API_KEY" ]; then
-  echo "  API key already configured via environment."
-elif [ -f ".shipme/project.json" ]; then
-  # Try to redeem the provisioning token from ShipMe
+# Always attempt provisioning token redemption (even if some env vars are set)
+# This delivers: Anthropic API key, Supabase token, Netlify token, GitHub token
+if [ -f ".shipme/project.json" ]; then
   PROVISIONING_TOKEN=$(node -e "
     try {
       const c = JSON.parse(require('fs').readFileSync('.shipme/project.json', 'utf8'));
@@ -77,27 +76,38 @@ elif [ -f ".shipme/project.json" ]; then
   " 2>/dev/null)
 
   if [ -n "$PROVISIONING_TOKEN" ]; then
-    echo "  Retrieving API key from ShipMe..."
+    echo "  Redeeming provisioning token from ShipMe..."
     RESPONSE=$(curl -s -X POST https://shipme.dev/api/provisioning-token/redeem \
       -H "Content-Type: application/json" \
       -d "{\"token\": \"$PROVISIONING_TOKEN\"}")
 
-    API_KEY=$(node -e "
-      try {
-        const r = JSON.parse(process.argv[1]);
-        if (r.anthropic_api_key) process.stdout.write(r.anthropic_api_key);
-      } catch(e) {}
-    " "$RESPONSE" 2>/dev/null)
+    # Parse ALL tokens from the response
+    API_KEY=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.anthropic_api_key)process.stdout.write(r.anthropic_api_key)}catch(e){}" "$RESPONSE" 2>/dev/null)
+    SB_TOKEN=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.supabase_access_token)process.stdout.write(r.supabase_access_token)}catch(e){}" "$RESPONSE" 2>/dev/null)
+    NF_TOKEN=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.netlify_auth_token)process.stdout.write(r.netlify_auth_token)}catch(e){}" "$RESPONSE" 2>/dev/null)
+    GH_TOKEN=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.github_token)process.stdout.write(r.github_token)}catch(e){}" "$RESPONSE" 2>/dev/null)
 
     if [ -n "$API_KEY" ]; then
-      # Write to dedicated env file (sourced by auto-launch-claude.sh)
-      echo "export ANTHROPIC_API_KEY=$API_KEY" > ~/.shipme-env
+      # Build env file with all available tokens
+      : > ~/.shipme-env  # Clear/create the file
 
-      # Also persist for all terminal sessions
-      echo "export ANTHROPIC_API_KEY=$API_KEY" >> ~/.bashrc
-      echo "export ANTHROPIC_API_KEY=$API_KEY" >> ~/.profile
-      export ANTHROPIC_API_KEY=$API_KEY
-      echo "  API key configured successfully."
+      echo "export ANTHROPIC_API_KEY=$API_KEY" >> ~/.shipme-env
+      [ -n "$SB_TOKEN" ] && echo "export SUPABASE_ACCESS_TOKEN=$SB_TOKEN" >> ~/.shipme-env
+      [ -n "$NF_TOKEN" ] && echo "export NETLIFY_AUTH_TOKEN=$NF_TOKEN" >> ~/.shipme-env
+      [ -n "$GH_TOKEN" ] && echo "export GITHUB_TOKEN=$GH_TOKEN" >> ~/.shipme-env
+
+      # Also persist to bashrc for interactive sessions
+      cat ~/.shipme-env >> ~/.bashrc
+      cat ~/.shipme-env >> ~/.profile
+
+      # Export for current process
+      source ~/.shipme-env
+
+      echo "  Credentials configured:"
+      echo "    ANTHROPIC_API_KEY: set"
+      [ -n "$SB_TOKEN" ] && echo "    SUPABASE_ACCESS_TOKEN: set" || echo "    SUPABASE_ACCESS_TOKEN: not provided"
+      [ -n "$NF_TOKEN" ] && echo "    NETLIFY_AUTH_TOKEN: set" || echo "    NETLIFY_AUTH_TOKEN: not provided"
+      [ -n "$GH_TOKEN" ] && echo "    GITHUB_TOKEN: set" || echo "    GITHUB_TOKEN: not provided"
 
       # Remove the provisioning token from project.json (security cleanup)
       node -e "
@@ -106,20 +116,22 @@ elif [ -f ".shipme/project.json" ]; then
         delete config.provisioningToken;
         fs.writeFileSync('.shipme/project.json', JSON.stringify(config, null, 2));
       " 2>/dev/null
-
-      # Commit the token removal
       git add .shipme/project.json 2>/dev/null
       git commit -m "Remove provisioning token (redeemed)" --no-verify 2>/dev/null || true
     else
-      echo "  Could not retrieve API key. Response: $RESPONSE"
-      echo "  Set ANTHROPIC_API_KEY manually: export ANTHROPIC_API_KEY=sk-ant-your-key"
+      echo "  Token redemption failed. Response: $RESPONSE"
     fi
   else
-    echo "  No provisioning token found. Set ANTHROPIC_API_KEY manually."
+    echo "  No provisioning token in project.json."
   fi
 else
-  echo "  No project config found. Set ANTHROPIC_API_KEY manually."
+  echo "  No project config found."
 fi
+
+# Fallback: check if credentials are set via Codespace secrets
+[ -z "$ANTHROPIC_API_KEY" ] && echo "  Warning: ANTHROPIC_API_KEY not set. Claude Code won't auto-launch."
+[ -z "$SUPABASE_ACCESS_TOKEN" ] && echo "  Warning: SUPABASE_ACCESS_TOKEN not set. Supabase provisioning will be skipped."
+[ -z "$NETLIFY_AUTH_TOKEN" ] && echo "  Warning: NETLIFY_AUTH_TOKEN not set. Netlify provisioning will be skipped."
 
 echo ""
 echo "======================================================"
