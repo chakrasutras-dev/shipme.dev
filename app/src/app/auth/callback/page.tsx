@@ -90,8 +90,8 @@ export default function AuthCallbackPage() {
           }
         }
 
-        setStatus("Authenticated! Launching...");
-        window.location.href = "/?launch=pending";
+        setStatus("Authenticated! Redirecting...");
+        window.location.href = "/?auth_complete=true";
       } catch (err: any) {
         console.error("[Callback] Unexpected error:", err);
         setStatus(`Error: ${err.message}`);
