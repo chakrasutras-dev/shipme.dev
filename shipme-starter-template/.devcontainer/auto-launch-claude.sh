@@ -73,7 +73,7 @@ echo ""
 # --dangerously-skip-permissions: allows MCP tools + Bash without prompting
 # Note: interactive mode triggers first-time onboarding; -p skips it
 claude -p --dangerously-skip-permissions \
-  "Read .shipme/project.json and .shipme/claude-instructions.md, then begin infrastructure provisioning. Start immediately without asking for confirmation."
+  "You are running in non-interactive print mode. There is NO user to respond to prompts. Read CLAUDE.md, then .shipme/project.json, then .shipme/claude-instructions.md. Execute the full provisioning workflow automatically: create Supabase project, run migrations, create Netlify site, configure env vars, build, and deploy. Do NOT ask questions, present options, or wait for input. If a step fails, log it and continue. Go."
 
 echo ""
 echo "======================================================"
