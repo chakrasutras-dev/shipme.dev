@@ -107,8 +107,12 @@ export async function POST(request: Request) {
     // The Codespace's post-create.sh will redeem this token to receive
     // ShipMe's Anthropic API key for Claude Code.
     let provisioningToken: string | undefined
-    if (process.env.SHIPME_ANTHROPIC_API_KEY) {
+    const hasShipmeKey = !!process.env.SHIPME_ANTHROPIC_API_KEY
+    console.log('[Launch] SHIPME_ANTHROPIC_API_KEY present:', hasShipmeKey)
+    console.log('[Launch] Supabase user ID:', user!.id)
+    if (hasShipmeKey) {
       provisioningToken = crypto.randomUUID()
+      console.log('[Launch] Generated provisioning token:', provisioningToken)
       const serviceClient = createServiceRoleClient()
       const { error: tokenError } = await serviceClient.from('provisioning_tokens').insert({
         token: provisioningToken,
@@ -117,9 +121,13 @@ export async function POST(request: Request) {
         expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min TTL
       })
       if (tokenError) {
-        console.error('[Launch] Failed to store provisioning token:', tokenError)
+        console.error('[Launch] Failed to store provisioning token:', JSON.stringify(tokenError))
         provisioningToken = undefined // Don't inject a token that's not in the DB
+      } else {
+        console.log('[Launch] Provisioning token stored successfully')
       }
+    } else {
+      console.log('[Launch] SHIPME_ANTHROPIC_API_KEY is not set, skipping provisioning token')
     }
 
     // Inject project configuration into .shipme/project.json
@@ -219,6 +227,7 @@ export async function POST(request: Request) {
       repo_url: repo.html_url,
       clone_url: repo.clone_url,
       launch_id: launch?.id,
+      provisioning_token_injected: !!provisioningToken,
       message: 'Repository created successfully! Click the Codespace URL to start developing.',
       next_steps: [
         'Click the Codespace URL to open your development environment',
