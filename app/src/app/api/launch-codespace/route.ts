@@ -56,11 +56,11 @@ export async function POST(request: Request) {
 
     const octokit = new Octokit({ auth: githubToken })
 
-    // Get authenticated user info
-    const { data: user } = await octokit.users.getAuthenticated()
+    // Get authenticated GitHub user info (named differently to avoid shadowing Supabase user)
+    const { data: githubUser } = await octokit.users.getAuthenticated()
 
     // Template repository configuration
-    const TEMPLATE_OWNER = process.env.TEMPLATE_OWNER || user.login
+    const TEMPLATE_OWNER = process.env.TEMPLATE_OWNER || githubUser.login
     const TEMPLATE_REPO = process.env.TEMPLATE_REPO || 'shipme_template'
 
     // Check if template repository exists
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     })
 
     // Wait for repository to be ready (GitHub template creation is async)
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    await new Promise(resolve => setTimeout(resolve, 3000))
 
     // Generate a one-time provisioning token for API key delivery.
     // The Codespace's post-create.sh will redeem this token to receive
@@ -110,12 +110,16 @@ export async function POST(request: Request) {
     if (process.env.SHIPME_ANTHROPIC_API_KEY) {
       provisioningToken = crypto.randomUUID()
       const serviceClient = createServiceRoleClient()
-      await serviceClient.from('provisioning_tokens').insert({
+      const { error: tokenError } = await serviceClient.from('provisioning_tokens').insert({
         token: provisioningToken,
-        user_id: user.id,
+        user_id: user!.id, // Supabase auth user ID (UUID)
         anthropic_api_key: process.env.SHIPME_ANTHROPIC_API_KEY,
         expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min TTL
       })
+      if (tokenError) {
+        console.error('[Launch] Failed to store provisioning token:', tokenError)
+        provisioningToken = undefined // Don't inject a token that's not in the DB
+      }
     }
 
     // Inject project configuration into .shipme/project.json
@@ -136,18 +140,40 @@ export async function POST(request: Request) {
       projectConfig.provisioningToken = provisioningToken
     }
 
-    try {
-      // Update .shipme/project.json in the new repository
-      await octokit.repos.createOrUpdateFileContents({
-        owner: user.login,
-        repo: projectName,
-        path: '.shipme/project.json',
-        message: '🚀 Add ShipMe project configuration',
-        content: Buffer.from(JSON.stringify(projectConfig, null, 2)).toString('base64')
-      })
-    } catch (error) {
-      console.error('Failed to inject project config:', error)
-      // Non-fatal - continue anyway
+    // Inject project.json into the new repo (with retry for race condition)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        // Get the existing file's SHA (needed for updates since template includes project.json)
+        let existingSha: string | undefined
+        try {
+          const { data: existingFile } = await octokit.repos.getContent({
+            owner: githubUser.login,
+            repo: projectName,
+            path: '.shipme/project.json'
+          })
+          if (!Array.isArray(existingFile) && existingFile.sha) {
+            existingSha = existingFile.sha
+          }
+        } catch {
+          // File doesn't exist yet — that's fine, we'll create it
+        }
+
+        await octokit.repos.createOrUpdateFileContents({
+          owner: githubUser.login,
+          repo: projectName,
+          path: '.shipme/project.json',
+          message: 'Add ShipMe project configuration',
+          content: Buffer.from(JSON.stringify(projectConfig, null, 2)).toString('base64'),
+          ...(existingSha ? { sha: existingSha } : {})
+        })
+        console.log(`[Launch] Injected project.json on attempt ${attempt}`)
+        break // Success
+      } catch (error) {
+        console.error(`[Launch] project.json injection attempt ${attempt}/3 failed:`, error)
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000)) // Wait before retry
+        }
+      }
     }
 
     // Generate Codespace URL
