@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     // Find the token (select all credential columns)
     const { data, error } = await supabase
       .from('provisioning_tokens')
-      .select('id, anthropic_api_key, supabase_access_token, netlify_auth_token, github_token, redeemed, expires_at')
+      .select('id, anthropic_api_key, supabase_access_token, supabase_org_id, netlify_auth_token, github_token, redeemed, expires_at')
       .eq('token', token)
       .single()
 
@@ -45,6 +45,7 @@ export async function POST(request: Request) {
       success: true,
       anthropic_api_key: data.anthropic_api_key,
       supabase_access_token: data.supabase_access_token || null,
+      supabase_org_id: data.supabase_org_id || null,
       netlify_auth_token: data.netlify_auth_token || null,
       github_token: data.github_token || null
     })

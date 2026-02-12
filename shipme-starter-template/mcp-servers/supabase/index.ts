@@ -16,6 +16,7 @@ import type {
   GetProjectInfoParams,
   GetProjectInfoResult
 } from './types.js'
+import { withRetry, fetchWithRetrySupport } from '../shared/retry.js'
 
 /**
  * ShipMe Supabase MCP Server
@@ -194,16 +195,15 @@ class SupabaseMCPServer {
     // Get organization ID (use provided or fetch first available)
     let orgId = this.organizationId
     if (!orgId) {
-      const orgsResponse = await fetch(`${SUPABASE_API_URL}/organizations`, {
-        headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!orgsResponse.ok) {
-        throw new Error('Failed to fetch organizations. Please provide SUPABASE_ORG_ID.')
-      }
+      const orgsResponse = await withRetry(
+        () => fetchWithRetrySupport(`${SUPABASE_API_URL}/organizations`, {
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        { label: 'Supabase org fetch' }
+      )
 
       const orgs = await orgsResponse.json() as Array<{ id: string; name: string }>
       if (orgs.length === 0) {
@@ -211,53 +211,57 @@ class SupabaseMCPServer {
       }
 
       orgId = orgs[0].id
+      console.error(`Using organization: ${orgs[0].name} (${orgId})`)
     }
 
-    // Create project
-    const response = await fetch(`${SUPABASE_API_URL}/projects`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name,
-        organization_id: orgId,
-        region,
-        db_pass: db_password,
-        plan
-      })
-    })
+    // Create project (with retry for transient errors)
+    const createResponse = await withRetry(
+      () => fetchWithRetrySupport(`${SUPABASE_API_URL}/projects`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name,
+          organization_id: orgId,
+          region,
+          db_pass: db_password,
+          plan
+        })
+      }),
+      { label: 'Supabase project creation' }
+    )
 
-    if (!response.ok) {
-      const error = await response.json() as { message?: string }
-      throw new Error(error.message || 'Failed to create Supabase project')
-    }
-
-    const project = await response.json() as { id: string; name: string; status: string }
+    const project = await createResponse.json() as { id: string; name: string; status: string }
 
     // Wait for project to initialize (typically takes 30-60 seconds)
     console.error(`Waiting for project ${project.id} to initialize...`)
     await this.waitForProjectReady(project.id)
 
-    // Get API keys
-    const keysResponse = await fetch(
-      `${SUPABASE_API_URL}/projects/${project.id}/api-keys`,
-      {
-        headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    )
-
+    // Get API keys (with retry — sometimes available slightly after ACTIVE_HEALTHY)
     let anonKey = ''
     let serviceRoleKey = ''
 
-    if (keysResponse.ok) {
+    try {
+      const keysResponse = await withRetry(
+        () => fetchWithRetrySupport(
+          `${SUPABASE_API_URL}/projects/${project.id}/api-keys`,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        ),
+        { label: 'Supabase API keys fetch' }
+      )
+
       const keys = await keysResponse.json() as Array<{ name: string; api_key: string }>
       anonKey = keys.find((k) => k.name === 'anon')?.api_key || ''
       serviceRoleKey = keys.find((k) => k.name === 'service_role')?.api_key || ''
+    } catch (err) {
+      console.error('Warning: Failed to fetch API keys:', err)
     }
 
     const result: CreateProjectResult = {

@@ -94,6 +94,29 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/?oauth_error=no_token`)
     }
 
+    // Fetch provider-specific metadata (e.g. Supabase organization ID)
+    let metadata: Record<string, any> = {}
+    if (provider === 'supabase') {
+      try {
+        const orgsRes = await fetch('https://api.supabase.com/v1/organizations', {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        })
+        if (orgsRes.ok) {
+          const orgs = await orgsRes.json() as Array<{ id: string; name: string }>
+          if (orgs.length > 0) {
+            metadata.organization_id = orgs[0].id
+            metadata.organization_name = orgs[0].name
+            console.log(`[OAuth Callback] Captured Supabase org: ${orgs[0].name} (${orgs[0].id})`)
+          }
+        } else {
+          console.warn(`[OAuth Callback] Supabase orgs fetch returned ${orgsRes.status}`)
+        }
+      } catch (e) {
+        console.warn('[OAuth Callback] Failed to fetch Supabase orgs:', e)
+        // Non-fatal — org ID is an optimization, not required
+      }
+    }
+
     // Store token in DB (upsert — replace if already connected)
     const serviceClient = createServiceRoleClient()
     const { error: dbError } = await serviceClient
@@ -103,6 +126,7 @@ export async function GET(request: Request) {
         provider,
         access_token: accessToken,
         refresh_token: refreshToken,
+        metadata,
         expires_at: expiresIn
           ? new Date(Date.now() + expiresIn * 1000).toISOString()
           : null,

@@ -322,4 +322,10 @@ CREATE TRIGGER update_user_oauth_tokens_updated_at
 ALTER TABLE provisioning_tokens
   ADD COLUMN IF NOT EXISTS supabase_access_token TEXT,
   ADD COLUMN IF NOT EXISTS netlify_auth_token TEXT,
-  ADD COLUMN IF NOT EXISTS github_token TEXT;
+  ADD COLUMN IF NOT EXISTS github_token TEXT,
+  ADD COLUMN IF NOT EXISTS supabase_org_id TEXT;
+
+-- Add metadata column to user_oauth_tokens for provider-specific data
+-- (e.g. Supabase organization_id captured during OAuth)
+ALTER TABLE user_oauth_tokens
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';

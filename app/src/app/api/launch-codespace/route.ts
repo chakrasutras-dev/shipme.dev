@@ -119,12 +119,15 @@ export async function POST(request: Request) {
     // Fetch user's OAuth tokens (Supabase + Netlify) from DB
     const { data: oauthTokens } = await serviceClient
       .from('user_oauth_tokens')
-      .select('provider, access_token')
+      .select('provider, access_token, metadata')
       .eq('user_id', user!.id)
 
-    const supabaseToken = oauthTokens?.find(t => t.provider === 'supabase')?.access_token || null
+    const supabaseTokenRow = oauthTokens?.find(t => t.provider === 'supabase')
+    const supabaseToken = supabaseTokenRow?.access_token || null
+    const supabaseOrgId = supabaseTokenRow?.metadata?.organization_id || null
     const netlifyToken = oauthTokens?.find(t => t.provider === 'netlify')?.access_token || null
     console.log('[Launch] Supabase token available:', !!supabaseToken)
+    console.log('[Launch] Supabase org ID:', supabaseOrgId || 'not captured')
     console.log('[Launch] Netlify token available:', !!netlifyToken)
     console.log('[Launch] GitHub token available:', !!githubToken)
 
@@ -136,6 +139,7 @@ export async function POST(request: Request) {
         user_id: user!.id,
         anthropic_api_key: process.env.SHIPME_ANTHROPIC_API_KEY,
         supabase_access_token: supabaseToken,
+        supabase_org_id: supabaseOrgId,
         netlify_auth_token: netlifyToken,
         github_token: githubToken,
         expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()

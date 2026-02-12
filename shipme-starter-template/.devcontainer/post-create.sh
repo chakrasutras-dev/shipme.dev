@@ -84,6 +84,7 @@ if [ -f ".shipme/project.json" ]; then
     # Parse ALL tokens from the response
     API_KEY=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.anthropic_api_key)process.stdout.write(r.anthropic_api_key)}catch(e){}" "$RESPONSE" 2>/dev/null)
     SB_TOKEN=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.supabase_access_token)process.stdout.write(r.supabase_access_token)}catch(e){}" "$RESPONSE" 2>/dev/null)
+    SB_ORG_ID=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.supabase_org_id)process.stdout.write(r.supabase_org_id)}catch(e){}" "$RESPONSE" 2>/dev/null)
     NF_TOKEN=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.netlify_auth_token)process.stdout.write(r.netlify_auth_token)}catch(e){}" "$RESPONSE" 2>/dev/null)
     GH_TOKEN=$(node -e "try{const r=JSON.parse(process.argv[1]);if(r.github_token)process.stdout.write(r.github_token)}catch(e){}" "$RESPONSE" 2>/dev/null)
 
@@ -93,6 +94,7 @@ if [ -f ".shipme/project.json" ]; then
 
       echo "export ANTHROPIC_API_KEY=$API_KEY" >> ~/.shipme-env
       [ -n "$SB_TOKEN" ] && echo "export SUPABASE_ACCESS_TOKEN=$SB_TOKEN" >> ~/.shipme-env
+      [ -n "$SB_ORG_ID" ] && echo "export SUPABASE_ORG_ID=$SB_ORG_ID" >> ~/.shipme-env
       [ -n "$NF_TOKEN" ] && echo "export NETLIFY_AUTH_TOKEN=$NF_TOKEN" >> ~/.shipme-env
       [ -n "$GH_TOKEN" ] && echo "export GITHUB_TOKEN=$GH_TOKEN" >> ~/.shipme-env
 
@@ -106,6 +108,7 @@ if [ -f ".shipme/project.json" ]; then
       echo "  Credentials configured:"
       echo "    ANTHROPIC_API_KEY: set"
       [ -n "$SB_TOKEN" ] && echo "    SUPABASE_ACCESS_TOKEN: set" || echo "    SUPABASE_ACCESS_TOKEN: not provided"
+      [ -n "$SB_ORG_ID" ] && echo "    SUPABASE_ORG_ID: set ($SB_ORG_ID)" || echo "    SUPABASE_ORG_ID: not provided"
       [ -n "$NF_TOKEN" ] && echo "    NETLIFY_AUTH_TOKEN: set" || echo "    NETLIFY_AUTH_TOKEN: not provided"
       [ -n "$GH_TOKEN" ] && echo "    GITHUB_TOKEN: set" || echo "    GITHUB_TOKEN: not provided"
 

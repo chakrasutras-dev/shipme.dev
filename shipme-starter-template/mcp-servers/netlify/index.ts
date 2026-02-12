@@ -16,6 +16,7 @@ import type {
   GetSiteInfoParams,
   GetSiteInfoResult
 } from './types.js'
+import { withRetry, fetchWithRetrySupport } from '../shared/retry.js'
 
 /**
  * ShipMe Netlify MCP Server
@@ -190,19 +191,17 @@ class NetlifyMCPServer {
       }
     }
 
-    const response = await fetch(`${NETLIFY_API_URL}/sites`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-      const error = await response.json() as { message?: string }
-      throw new Error(error.message || 'Failed to create Netlify site')
-    }
+    const response = await withRetry(
+      () => fetchWithRetrySupport(`${NETLIFY_API_URL}/sites`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      }),
+      { label: 'Netlify site creation' }
+    )
 
     const site = await response.json() as {
       id: string
@@ -313,25 +312,23 @@ class NetlifyMCPServer {
   private async deploySite(params: DeploySiteParams) {
     const { site_id, directory = '.', branch = 'main' } = params
 
-    // Trigger a new build
-    const response = await fetch(
-      `${NETLIFY_API_URL}/sites/${site_id}/builds`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          clear_cache: false
-        })
-      }
+    // Trigger a new build (with retry for transient errors)
+    const response = await withRetry(
+      () => fetchWithRetrySupport(
+        `${NETLIFY_API_URL}/sites/${site_id}/builds`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            clear_cache: false
+          })
+        }
+      ),
+      { label: 'Netlify deploy trigger' }
     )
-
-    if (!response.ok) {
-      const error = await response.json() as { message?: string }
-      throw new Error(error.message || 'Failed to trigger deployment')
-    }
 
     const build = await response.json() as {
       id: string

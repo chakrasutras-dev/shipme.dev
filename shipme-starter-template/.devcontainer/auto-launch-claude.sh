@@ -63,17 +63,17 @@ echo ""
 echo "======================================================"
 echo "  ShipMe: Starting Claude Code"
 echo "======================================================"
-echo "  Claude will read your project configuration and"
-echo "  begin infrastructure provisioning automatically."
+echo "  Claude will provision infrastructure, customize"
+echo "  the starter app, build, and deploy automatically."
 echo "======================================================"
 echo ""
 
-# Launch Claude Code in print mode for auto-provisioning
+# Launch Claude Code in print mode for auto-provisioning + app customization
 # -p: print mode — processes prompt, runs tools, outputs results, exits
 # --dangerously-skip-permissions: allows MCP tools + Bash without prompting
 # Note: interactive mode triggers first-time onboarding; -p skips it
 claude -p --dangerously-skip-permissions \
-  "You are running in non-interactive print mode. There is NO user to respond to prompts. Read CLAUDE.md, then .shipme/project.json, then .shipme/claude-instructions.md. Execute the full provisioning workflow automatically: create Supabase project, run migrations, create Netlify site, configure env vars, build, and deploy. Do NOT ask questions, present options, or wait for input. If a step fails, log it and continue. Go."
+  "You are running in non-interactive print mode. There is NO user to respond to prompts. Read CLAUDE.md, then .shipme/project.json, then .shipme/claude-instructions.md. Execute the full workflow: create Supabase project, run database migrations, create Netlify site, configure env vars, write .env.local, then CUSTOMIZE the existing Next.js starter app based on the project description (add pages, components, features, auth). Finally build and deploy. A starter app already exists in src/ — do NOT create a new project from scratch. Do NOT ask questions or wait for input. If a step fails, log it and continue. Go."
 
 echo ""
 echo "======================================================"
