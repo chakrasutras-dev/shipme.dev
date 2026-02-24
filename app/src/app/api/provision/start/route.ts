@@ -56,11 +56,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Netlify account not connected', step: 'netlify_auth' }, { status: 400 })
   }
 
-  // Auto-refresh Supabase token if expired or close to expiry
+  // Auto-refresh Supabase token if expired or close to expiry (within 5 minutes)
   const supabaseExpiresAt = supabaseRow?.expires_at ? new Date(supabaseRow.expires_at) : null
-  const isExpiredOrSoon = supabaseExpiresAt ? supabaseExpiresAt.getTime() < Date.now() + 5 * 60 * 1000 : false
-  if ((isExpiredOrSoon || true) && supabaseRow?.refresh_token) {
-    // Always attempt refresh to ensure we have a valid token
+  const isExpiredOrSoon = !supabaseExpiresAt || supabaseExpiresAt.getTime() < Date.now() + 5 * 60 * 1000
+  if (isExpiredOrSoon && supabaseRow?.refresh_token) {
     try {
       const refreshRes = await fetch('https://api.supabase.com/v1/oauth/token', {
         method: 'POST',
@@ -172,6 +171,31 @@ export async function POST(request: Request) {
 
   // ── Step 2: Fire Supabase project creation (don't wait for ACTIVE_HEALTHY) ─
   let supabaseOrgIdResolved = supabaseOrgId
+
+  // Try JWT decode as fallback if org ID not in metadata
+  if (!supabaseOrgIdResolved) {
+    try {
+      const parts = supabaseToken.split('.')
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
+        supabaseOrgIdResolved = payload.org_id || payload.organization_id || null
+        if (!supabaseOrgIdResolved && typeof payload.sub === 'string' && payload.sub.startsWith('org_')) {
+          supabaseOrgIdResolved = payload.sub
+        }
+        if (supabaseOrgIdResolved) {
+          console.log('[Provision/Start] Got org ID from JWT:', supabaseOrgIdResolved)
+          // Persist for next time
+          await serviceClient.from('user_oauth_tokens').update({
+            metadata: { ...supabaseRow?.metadata, organization_id: supabaseOrgIdResolved }
+          }).eq('user_id', user.id).eq('provider', 'supabase')
+        }
+      }
+    } catch (e) {
+      console.warn('[Provision/Start] JWT decode failed:', e)
+    }
+  }
+
+  // Try API fetch as last resort
   if (!supabaseOrgIdResolved) {
     try {
       const orgsRes = await fetch(`${SUPABASE_API}/organizations`, {
@@ -180,6 +204,13 @@ export async function POST(request: Request) {
       if (orgsRes.ok) {
         const orgs = await orgsRes.json() as Array<{ id: string }>
         supabaseOrgIdResolved = orgs[0]?.id
+        if (supabaseOrgIdResolved) {
+          console.log('[Provision/Start] Got org ID from API:', supabaseOrgIdResolved)
+          // Persist for next time
+          await serviceClient.from('user_oauth_tokens').update({
+            metadata: { ...supabaseRow?.metadata, organization_id: supabaseOrgIdResolved }
+          }).eq('user_id', user.id).eq('provider', 'supabase')
+        }
       } else {
         const errText = await orgsRes.text()
         console.error('[Provision/Start] Supabase orgs fetch failed:', orgsRes.status, errText)

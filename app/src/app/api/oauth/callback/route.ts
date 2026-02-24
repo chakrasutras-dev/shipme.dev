@@ -94,31 +94,75 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/?oauth_error=no_token`)
     }
 
+    // Store token in DB (upsert — replace if already connected)
+    const serviceClient = createServiceRoleClient()
+
     // Fetch provider-specific metadata (e.g. Supabase organization ID)
     let metadata: Record<string, any> = {}
     if (provider === 'supabase') {
+      let orgId: string | null = null
+      let orgName: string | null = null
+
+      // 1. Try JWT decode — Supabase org-scoped tokens embed org info in payload
       try {
-        const orgsRes = await fetch('https://api.supabase.com/v1/organizations', {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        })
-        if (orgsRes.ok) {
-          const orgs = await orgsRes.json() as Array<{ id: string; name: string }>
-          if (orgs.length > 0) {
-            metadata.organization_id = orgs[0].id
-            metadata.organization_name = orgs[0].name
-            console.log(`[OAuth Callback] Captured Supabase org: ${orgs[0].name} (${orgs[0].id})`)
+        const parts = accessToken.split('.')
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
+          console.log('[OAuth Callback] JWT payload keys:', Object.keys(payload))
+          orgId = payload.org_id || payload.organization_id || null
+          // Some tokens use sub=org_xxxxx format
+          if (!orgId && typeof payload.sub === 'string' && payload.sub.startsWith('org_')) {
+            orgId = payload.sub
           }
-        } else {
-          console.warn(`[OAuth Callback] Supabase orgs fetch returned ${orgsRes.status}`)
+          if (orgId) console.log('[OAuth Callback] Got org ID from JWT:', orgId)
         }
       } catch (e) {
-        console.warn('[OAuth Callback] Failed to fetch Supabase orgs:', e)
-        // Non-fatal — org ID is an optimization, not required
+        console.warn('[OAuth Callback] JWT decode failed:', e)
+      }
+
+      // 2. Try API fetch as fallback
+      if (!orgId) {
+        try {
+          const orgsRes = await fetch('https://api.supabase.com/v1/organizations', {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          })
+          if (orgsRes.ok) {
+            const orgs = await orgsRes.json() as Array<{ id: string; name: string }>
+            if (orgs.length > 0) {
+              orgId = orgs[0].id
+              orgName = orgs[0].name
+              console.log(`[OAuth Callback] Got org from API: ${orgName} (${orgId})`)
+            }
+          } else {
+            console.warn(`[OAuth Callback] Supabase orgs API returned ${orgsRes.status}`)
+          }
+        } catch (e) {
+          console.warn('[OAuth Callback] Failed to fetch Supabase orgs:', e)
+        }
+      }
+
+      // 3. Preserve existing org ID from DB if both methods failed
+      if (!orgId) {
+        const { data: existing } = await serviceClient
+          .from('user_oauth_tokens')
+          .select('metadata')
+          .eq('user_id', user_id)
+          .eq('provider', 'supabase')
+          .single()
+        if (existing?.metadata?.organization_id) {
+          orgId = existing.metadata.organization_id
+          orgName = existing.metadata.organization_name || null
+          console.log('[OAuth Callback] Preserved existing org from DB:', orgId)
+        }
+      }
+
+      if (orgId) {
+        metadata.organization_id = orgId
+        if (orgName) metadata.organization_name = orgName
+      } else {
+        console.warn('[OAuth Callback] Could not determine Supabase org ID — token may be user-scoped')
       }
     }
-
-    // Store token in DB (upsert — replace if already connected)
-    const serviceClient = createServiceRoleClient()
     const { error: dbError } = await serviceClient
       .from('user_oauth_tokens')
       .upsert({
