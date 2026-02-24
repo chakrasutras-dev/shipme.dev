@@ -324,6 +324,20 @@ export default function LandingPage() {
               >
                 <Github className="w-5 h-5" />
               </a>
+              {isLoggedIn && (
+                <button
+                  onClick={async () => {
+                    await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' })
+                    setIsLoggedIn(false)
+                    setConnectedAccounts({ github: false, supabase: false, netlify: false })
+                    setRecommendedStack(null)
+                    handleRetry()
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1 rounded border border-white/10 hover:border-white/20"
+                >
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
         </div>
