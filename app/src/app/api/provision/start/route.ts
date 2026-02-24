@@ -30,10 +30,12 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { projectName, description } = body
-  if (!projectName || !description) {
+  const { projectName, description: rawDescription } = body
+  if (!projectName || !rawDescription) {
     return NextResponse.json({ error: 'projectName and description are required' }, { status: 400 })
   }
+  // Strip control characters (newlines, tabs, etc.) — GitHub rejects them in repo descriptions
+  const description = rawDescription.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 350)
 
   const serviceClient = createServiceRoleClient()
 
