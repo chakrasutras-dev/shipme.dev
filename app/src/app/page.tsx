@@ -505,9 +505,17 @@ export default function LandingPage() {
                               <span className="text-sm text-white">Supabase</span>
                             </div>
                             {connectedAccounts.supabase ? (
-                              <span className="flex items-center gap-1 text-xs text-emerald-400">
-                                <Check className="w-4 h-4" /> Connected
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="flex items-center gap-1 text-xs text-emerald-400">
+                                  <Check className="w-4 h-4" /> Connected
+                                </span>
+                                <button
+                                  onClick={() => connectProvider("supabase")}
+                                  className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
+                                >
+                                  Reconnect
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => connectProvider("supabase")}
@@ -528,9 +536,17 @@ export default function LandingPage() {
                               <span className="text-sm text-white">Netlify</span>
                             </div>
                             {connectedAccounts.netlify ? (
-                              <span className="flex items-center gap-1 text-xs text-emerald-400">
-                                <Check className="w-4 h-4" /> Connected
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="flex items-center gap-1 text-xs text-emerald-400">
+                                  <Check className="w-4 h-4" /> Connected
+                                </span>
+                                <button
+                                  onClick={() => connectProvider("netlify")}
+                                  className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
+                                >
+                                  Reconnect
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => connectProvider("netlify")}

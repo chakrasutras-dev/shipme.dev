@@ -39,14 +39,14 @@ export async function POST(request: Request) {
 
   const serviceClient = createServiceRoleClient()
 
-  // Fetch user's Supabase + Netlify tokens
+  // Fetch user's Supabase + Netlify tokens (include refresh_token for auto-refresh)
   const { data: oauthTokens } = await serviceClient
     .from('user_oauth_tokens')
-    .select('provider, access_token, metadata')
+    .select('provider, access_token, refresh_token, expires_at, metadata')
     .eq('user_id', user.id)
 
   const supabaseRow = oauthTokens?.find(t => t.provider === 'supabase')
-  const supabaseToken = supabaseRow?.access_token
+  let supabaseToken = supabaseRow?.access_token
   const supabaseOrgId = supabaseRow?.metadata?.organization_id
 
   if (!supabaseToken) {
@@ -54,6 +54,42 @@ export async function POST(request: Request) {
   }
   if (!oauthTokens?.find(t => t.provider === 'netlify')) {
     return NextResponse.json({ error: 'Netlify account not connected', step: 'netlify_auth' }, { status: 400 })
+  }
+
+  // Auto-refresh Supabase token if expired or close to expiry
+  const supabaseExpiresAt = supabaseRow?.expires_at ? new Date(supabaseRow.expires_at) : null
+  const isExpiredOrSoon = supabaseExpiresAt ? supabaseExpiresAt.getTime() < Date.now() + 5 * 60 * 1000 : false
+  if ((isExpiredOrSoon || true) && supabaseRow?.refresh_token) {
+    // Always attempt refresh to ensure we have a valid token
+    try {
+      const refreshRes = await fetch('https://api.supabase.com/v1/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: supabaseRow.refresh_token,
+          client_id: process.env.SHIPME_SUPABASE_CLIENT_ID!,
+          client_secret: process.env.SHIPME_SUPABASE_CLIENT_SECRET!
+        })
+      })
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json() as { access_token?: string; refresh_token?: string; expires_in?: number }
+        if (refreshData.access_token) {
+          supabaseToken = refreshData.access_token
+          await serviceClient.from('user_oauth_tokens').update({
+            access_token: refreshData.access_token,
+            refresh_token: refreshData.refresh_token || supabaseRow.refresh_token,
+            expires_at: refreshData.expires_in ? new Date(Date.now() + refreshData.expires_in * 1000).toISOString() : null,
+            updated_at: new Date().toISOString()
+          }).eq('user_id', user.id).eq('provider', 'supabase')
+          console.log('[Provision/Start] Supabase token refreshed successfully')
+        }
+      } else {
+        console.warn('[Provision/Start] Token refresh failed:', await refreshRes.text())
+      }
+    } catch (e) {
+      console.warn('[Provision/Start] Token refresh error:', e)
+    }
   }
 
   // ── Step 1: Create GitHub repo from template ─────────────────────────────
@@ -124,19 +160,30 @@ export async function POST(request: Request) {
   let supabaseOrgIdResolved = supabaseOrgId
   if (!supabaseOrgIdResolved) {
     try {
-      const res = await fetch(`${SUPABASE_API}/organizations`, {
+      const orgsRes = await fetch(`${SUPABASE_API}/organizations`, {
         headers: { Authorization: `Bearer ${supabaseToken}` }
       })
-      if (res.ok) {
-        const orgs = await res.json() as Array<{ id: string }>
+      if (orgsRes.ok) {
+        const orgs = await orgsRes.json() as Array<{ id: string }>
         supabaseOrgIdResolved = orgs[0]?.id
+      } else {
+        const errText = await orgsRes.text()
+        console.error('[Provision/Start] Supabase orgs fetch failed:', orgsRes.status, errText)
+        if (orgsRes.status === 401) {
+          return NextResponse.json({
+            error: 'Supabase token is invalid or expired. Please reconnect your Supabase account.',
+            step: 'supabase_org'
+          }, { status: 400 })
+        }
       }
-    } catch {}
+    } catch (e) {
+      console.error('[Provision/Start] Supabase orgs fetch error:', e)
+    }
   }
 
   if (!supabaseOrgIdResolved) {
     return NextResponse.json({
-      error: 'No Supabase organization found. Your Supabase token may have expired — disconnect and reconnect Supabase, then try again.',
+      error: 'No Supabase organization found. Please reconnect your Supabase account (your token may have expired).',
       step: 'supabase_org'
     }, { status: 400 })
   }
