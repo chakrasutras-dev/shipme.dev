@@ -1,46 +1,49 @@
 # ShipMe Project
 
-This is a ShipMe-provisioned development environment with a Next.js starter app.
-All credentials are pre-configured as environment variables.
+This is a ShipMe-provisioned project. Your infrastructure is **already live**:
+- GitHub repo: this workspace
+- Supabase database: running (credentials in env vars below)
+- Netlify site: deployed and auto-deploys on push to `main`
 
-## First Action
+## Your Role
 
-1. Read `.shipme/project.json` for project details
-2. Read `.shipme/claude-instructions.md` for the full workflow
-3. Begin IMMEDIATELY — do NOT ask for confirmation, do NOT present options, do NOT wait for user input
+Help the user **customize and build out this app**. Infrastructure setup is complete — no need to create Supabase projects, Netlify sites, or configure OAuth providers. Just focus on building features.
+
+## Project Details
+
+Read `.shipme/project.json` for the project name, description, and stack.
 
 ## What's Already Here
 
-A minimal Next.js + Supabase + Tailwind app is ready in `src/`:
+A minimal Next.js + Supabase + Tailwind starter in `src/`:
 - `src/app/layout.tsx` — Root layout
 - `src/app/page.tsx` — Landing page (reads project.json)
 - `src/lib/supabase/client.ts` — Browser Supabase client
 - `src/lib/supabase/server.ts` — Server Supabase client
 
-Do NOT create a new project from scratch. CUSTOMIZE this existing app.
+Customize this existing app. Do NOT scaffold a new project from scratch.
 
-## Credentials
+## Credentials (already in env)
 
-All required credentials are pre-configured as environment variables:
-- `SUPABASE_ACCESS_TOKEN` — Supabase Management API
-- `SUPABASE_ORG_ID` — Supabase organization (for project creation)
-- `NETLIFY_AUTH_TOKEN` — Netlify API
-- `GITHUB_TOKEN` — GitHub API
-- `ANTHROPIC_API_KEY` — Already configured (this is how you're running)
+```
+NEXT_PUBLIC_SUPABASE_URL      — your Supabase project URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY — public anon key
+SUPABASE_SERVICE_ROLE_KEY     — service role key (server-side only)
+ANTHROPIC_API_KEY             — for Claude Code
+```
 
-Do NOT check or print credential status. Do NOT ask the user to set tokens. Just use them directly via MCP tools.
+## Development
 
-## Available MCP Servers
+```bash
+npm run dev      # local dev server at http://localhost:3000
+npm run build    # production build
+git push         # triggers Netlify auto-deploy
+```
 
-- **supabase**: `create_project`, `execute_sql`, `configure_auth_provider`, `get_project_info`
-- **netlify**: `create_site`, `configure_env_vars`, `deploy_site`, `get_site_info`
-- **github**: `create_repository`, `create_secret`, `push_files`
+## Common First Steps
 
-## Key Rules
-
-- Never log or commit credentials
-- Do NOT ask for confirmation — just execute
-- Do NOT present options or choices — just execute
-- Report progress at each step with clear status updates
-- If a step fails, log the error and continue with remaining steps
-- This runs in non-interactive print mode — there is no user to respond to prompts
+1. Read `.shipme/project.json` to understand the project
+2. Check `src/app/page.tsx` — customize the landing page
+3. Add your first feature based on the project description
+4. Run `npm run dev` to preview locally
+5. Push to `main` to deploy automatically

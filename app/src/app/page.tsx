@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { ArrowRight, Github, Zap, Shield, Terminal, Rocket, Sparkles, Check, ExternalLink } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ArrowRight, Github, Zap, Shield, Terminal, Rocket, Sparkles, Check, ExternalLink, X, RefreshCw } from "lucide-react";
 import { signInWithGitHub, getSession } from "@/lib/auth/supabase-auth";
 
 type ConnectedAccounts = {
@@ -10,13 +10,35 @@ type ConnectedAccounts = {
   netlify: boolean;
 };
 
+type StepStatus = 'pending' | 'in_progress' | 'done' | 'failed';
+
+type ProvisionStep = {
+  id: string;
+  label: string;
+  status: StepStatus;
+  detail?: string;
+};
+
+type ProvisionResult = {
+  github_repo_url: string;
+  supabase_url: string;
+  supabase_dashboard_url: string;
+  netlify_url: string;
+  netlify_admin_url: string;
+  project_name: string;
+};
+
+const INITIAL_STEPS: ProvisionStep[] = [
+  { id: 'github', label: 'Creating GitHub repository', status: 'pending' },
+  { id: 'supabase', label: 'Provisioning Supabase database', status: 'pending' },
+  { id: 'netlify', label: 'Deploying to Netlify', status: 'pending' },
+];
+
 export default function LandingPage() {
   const [projectIdea, setProjectIdea] = useState("");
   const [repoName, setRepoName] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [recommendedStack, setRecommendedStack] = useState<any>(null);
-  const [isLaunching, setIsLaunching] = useState(false);
-  const [launchResult, setLaunchResult] = useState<any>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccounts>({
     github: false,
@@ -25,9 +47,22 @@ export default function LandingPage() {
   });
   const [isCheckingAccounts, setIsCheckingAccounts] = useState(false);
 
-  const allConnected = connectedAccounts.github && connectedAccounts.supabase && connectedAccounts.netlify;
+  // Provisioning state
+  const [isProvisioning, setIsProvisioning] = useState(false);
+  const [provisionSteps, setProvisionSteps] = useState<ProvisionStep[]>(INITIAL_STEPS);
+  const [provisionResult, setProvisionResult] = useState<ProvisionResult | null>(null);
+  const [provisionError, setProvisionError] = useState<{ step: string; message: string } | null>(null);
+  const [codespaceUrl, setCodespaceUrl] = useState<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch connected accounts status (returns data for use in init flow)
+  const allConnected = connectedAccounts.github && connectedAccounts.supabase && connectedAccounts.netlify;
+  const showTimeline = isProvisioning || !!provisionResult || !!provisionError;
+
+  const updateStep = (id: string, updates: Partial<ProvisionStep>) => {
+    setProvisionSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  // Fetch connected accounts status
   const refreshConnectedAccounts = async (): Promise<{ accounts: ConnectedAccounts; all_connected: boolean } | null> => {
     try {
       setIsCheckingAccounts(true);
@@ -80,7 +115,6 @@ export default function LandingPage() {
       if (response.ok) {
         const data = await response.json();
         setRecommendedStack(data);
-        // Check connected accounts once we have a stack recommendation
         if (isLoggedIn) {
           refreshConnectedAccounts();
         }
@@ -95,7 +129,6 @@ export default function LandingPage() {
   // Unified init: check session, handle URL params, restore state
   useEffect(() => {
     const init = async () => {
-      // 1. Check if user has an existing session
       const session = await getSession();
       if (session) {
         setIsLoggedIn(true);
@@ -103,7 +136,7 @@ export default function LandingPage() {
 
       const urlParams = new URLSearchParams(window.location.search);
 
-      // 2. Handle OAuth success/error (Supabase/Netlify connect)
+      // Handle OAuth success/error (Supabase/Netlify connect)
       const oauthSuccess = urlParams.get("oauth_success");
       const oauthError = urlParams.get("oauth_error");
 
@@ -113,40 +146,21 @@ export default function LandingPage() {
         if (oauthError) {
           alert(`OAuth connection failed: ${oauthError}`);
         }
-        // Refresh connected accounts after OAuth redirect
         await refreshConnectedAccounts();
         return;
       }
 
-      // 3. Handle auth complete (after GitHub sign-in) or legacy launch=pending
+      // Handle auth complete (after GitHub sign-in)
       const authComplete = urlParams.get("auth_complete") === "true";
-      const launchPending = urlParams.get("launch") === "pending";
-
-      if (authComplete || launchPending) {
+      if (authComplete) {
         window.history.replaceState({}, "", "/");
         setIsLoggedIn(true);
         restoreUiState();
-
-        // Check connected accounts before deciding to auto-launch
-        const accountsData = await refreshConnectedAccounts();
-
-        // Only auto-launch if ALL accounts are connected AND there's pending launch data
-        const stored = localStorage.getItem("pendingCodespaceLaunch");
-        if (accountsData?.all_connected && stored) {
-          localStorage.removeItem("pendingCodespaceLaunch");
-          try {
-            const launchData = JSON.parse(stored);
-            setIsLaunching(true);
-            launchCodespace(launchData);
-          } catch {
-            setIsLaunching(false);
-          }
-        }
-        // If not all connected, UI will show Connect panel — user connects remaining, then launches
+        await refreshConnectedAccounts();
         return;
       }
 
-      // 4. Handle errors
+      // Handle errors
       const hasError = urlParams.get("error");
       if (hasError) {
         alert(`Authentication failed: ${hasError}. Please try again.`);
@@ -154,7 +168,7 @@ export default function LandingPage() {
         return;
       }
 
-      // 5. If already logged in, fetch connected accounts
+      // If already logged in, fetch connected accounts
       if (session) {
         await refreshConnectedAccounts();
       }
@@ -163,16 +177,62 @@ export default function LandingPage() {
     init();
   }, []);
 
-  // Sign in with GitHub (just sign in, don't auto-launch)
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, []);
+
+  const stopPolling = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
+  const pollStatus = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/provision/status?job_id=${jobId}`, { credentials: 'include' });
+      const data = await res.json();
+
+      if (data.status === 'supabase_creating') {
+        updateStep('supabase', { status: 'in_progress', detail: data.message || 'Initializing database...' });
+      } else if (data.status === 'supabase_ready') {
+        updateStep('supabase', { status: 'in_progress', detail: 'Database ready, creating Netlify site...' });
+        updateStep('netlify', { status: 'in_progress' });
+      } else if (data.status === 'done') {
+        stopPolling();
+        updateStep('supabase', { status: 'done' });
+        updateStep('netlify', { status: 'done', detail: data.netlify_url });
+        setProvisionResult({
+          github_repo_url: data.github_repo_url,
+          supabase_url: data.supabase_url,
+          supabase_dashboard_url: data.supabase_dashboard_url,
+          netlify_url: data.netlify_url,
+          netlify_admin_url: data.netlify_admin_url,
+          project_name: data.project_name,
+        });
+        setIsProvisioning(false);
+      } else if (data.status === 'failed') {
+        stopPolling();
+        const failedStepId =
+          data.error_step?.startsWith('netlify') ? 'netlify' :
+          data.error_step?.startsWith('supabase') ? 'supabase' : 'github';
+        updateStep(failedStepId, { status: 'failed', detail: data.error_message });
+        setProvisionError({ step: data.error_step || 'unknown', message: data.error_message });
+        setIsProvisioning(false);
+      }
+    } catch (err) {
+      console.error('Polling error:', err);
+    }
+  };
+
+  // Sign in with GitHub
   const handleGitHubSignIn = async () => {
-    // Save UI state before redirect
     localStorage.setItem("pendingProjectIdea", projectIdea);
-    if (recommendedStack) {
-      localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
-    }
-    if (repoName) {
-      localStorage.setItem("pendingRepoName", repoName);
-    }
+    if (recommendedStack) localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
+    if (repoName) localStorage.setItem("pendingRepoName", repoName);
     const { error } = await signInWithGitHub();
     if (error) {
       console.error("GitHub auth failed:", error);
@@ -180,100 +240,67 @@ export default function LandingPage() {
     }
   };
 
-  // Connect Supabase or Netlify (OAuth redirect)
+  // Connect Supabase or Netlify
   const connectProvider = (provider: "supabase" | "netlify") => {
-    // Save UI state before redirect
     localStorage.setItem("pendingProjectIdea", projectIdea);
-    if (recommendedStack) {
-      localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
-    }
-    if (repoName) {
-      localStorage.setItem("pendingRepoName", repoName);
-    }
-    // Redirect to OAuth start
+    if (recommendedStack) localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
+    if (repoName) localStorage.setItem("pendingRepoName", repoName);
     window.location.href = `/api/oauth/start?provider=${provider}`;
   };
 
-  const launchCodespace = async (launchData: any) => {
-    setIsLaunching(true);
+  const handleShipIt = async () => {
+    if (!allConnected) return;
+
+    setIsProvisioning(true);
+    setProvisionError(null);
+    setProvisionResult(null);
+    setCodespaceUrl(null);
+    setProvisionSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'pending' as StepStatus })));
+    updateStep('github', { status: 'in_progress' });
+
+    const finalRepoName = repoName.trim()
+      ? repoName.toLowerCase().replace(/[^a-z0-9-]/g, '-')
+      : projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
     try {
-      const response = await fetch("/api/launch-codespace", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(launchData),
+      const res = await fetch('/api/provision/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ projectName: finalRepoName, description: projectIdea }),
       });
+      const data = await res.json();
 
-      const result = await response.json();
-
-      if (response.ok && result.success) {
-        setLaunchResult(result);
-        if (result.codespace_url) {
-          window.open(result.codespace_url, "_blank");
-        }
-      } else if (response.status === 401) {
-        // Session expired — need to re-authenticate
-        alert("Your session has expired. Please sign in again.");
-        setIsLoggedIn(false);
-        setConnectedAccounts({ github: false, supabase: false, netlify: false });
-      } else {
-        console.error("Launch failed:", result);
-        alert(`Failed to launch: ${result.error || "Unknown error"}`);
+      if (!res.ok) {
+        updateStep('github', { status: 'failed', detail: data.error });
+        setProvisionError({ step: data.step || 'github', message: data.error });
+        setIsProvisioning(false);
+        return;
       }
-    } catch (err) {
-      console.error("Launch error:", err);
-      alert("Failed to launch Codespace. Please try again.");
-    } finally {
-      setIsLaunching(false);
+
+      updateStep('github', { status: 'done', detail: data.repo_url });
+      updateStep('supabase', { status: 'in_progress', detail: 'Starting Supabase project...' });
+      if (data.codespace_url) setCodespaceUrl(data.codespace_url);
+
+      const jobId = data.job_id;
+      // Poll immediately, then every 3s
+      await pollStatus(jobId);
+      pollIntervalRef.current = setInterval(() => pollStatus(jobId), 3000);
+    } catch (err: any) {
+      updateStep('github', { status: 'failed', detail: err.message });
+      setProvisionError({ step: 'github', message: err.message });
+      setIsProvisioning(false);
     }
   };
 
-  const handleLaunchCodespace = async () => {
-    if (!allConnected) return; // Safety check — button should be disabled
-    setIsLaunching(true);
-    try {
-      const finalRepoName = repoName.trim()
-        ? repoName.toLowerCase().replace(/[^a-z0-9-]/g, "-")
-        : projectIdea.substring(0, 50).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-
-      const launchData = {
-        projectName: finalRepoName,
-        description: projectIdea,
-        stack: recommendedStack?.recommendation?.stack || {},
-      };
-
-      await launchCodespace(launchData);
-    } catch (err) {
-      console.error("Launch error:", err);
-      alert("Failed to launch Codespace. Please try again.");
-      setIsLaunching(false);
-    }
+  const handleRetry = () => {
+    stopPolling();
+    setIsProvisioning(false);
+    setProvisionError(null);
+    setProvisionResult(null);
+    setCodespaceUrl(null);
+    setProvisionSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'pending' as StepStatus })));
   };
-
-  // Full-page launching state
-  if (isLaunching && !recommendedStack) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
-        <div className="text-center max-w-lg mx-auto px-4">
-          <div className="w-12 h-12 border-2 border-[#00f5ff] border-t-transparent rounded-full animate-spin mx-auto mb-6" />
-          <h2 className="text-2xl font-bold text-white mb-3 font-['Syne']">Launching Your Codespace</h2>
-          <p className="text-slate-400">Setting up your development environment...</p>
-          {launchResult && launchResult.codespace_url && (
-            <a
-              href={launchResult.codespace_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 mt-6 px-6 py-3 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] text-slate-950 rounded-lg font-semibold hover:shadow-xl transition-all"
-            >
-              <Terminal className="w-5 h-5" />
-              Open Codespace
-              <ArrowRight className="w-4 h-4" />
-            </a>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
@@ -285,7 +312,7 @@ export default function LandingPage() {
               <Rocket className="w-7 h-7 text-[#00f5ff]" />
               <span className="text-xl font-bold text-white font-['Syne']">ShipMe</span>
               <span className="text-xs bg-[#00f5ff]/10 text-[#00f5ff] px-2 py-1 rounded-full border border-[#00f5ff]/20">
-                v2.0
+                v3.0
               </span>
             </div>
             <div className="flex items-center gap-4">
@@ -311,7 +338,7 @@ export default function LandingPage() {
           <div className="relative">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-6">
               <Sparkles className="w-4 h-4 text-[#00f5ff]" />
-              <span className="text-sm text-slate-300">Watch Claude Code provision your infrastructure</span>
+              <span className="text-sm text-slate-300">GitHub + Supabase + Netlify — fully provisioned in minutes</span>
             </div>
 
             <h1 className="text-5xl md:text-6xl font-bold mb-6 font-['Syne']">
@@ -325,9 +352,11 @@ export default function LandingPage() {
             </h1>
 
             <p className="text-xl text-slate-400 mb-12 max-w-2xl mx-auto leading-relaxed">
-              Describe your app. Launch a GitHub Codespace. Watch Claude Code automatically provision{" "}
-              <span className="text-[#FFD700]">Supabase</span>, <span className="text-[#00f5ff]">Netlify</span>, and{" "}
-              <span className="text-[#FF00FF]">OAuth</span> while you learn.
+              Describe your app. Connect your accounts. Click{" "}
+              <span className="text-[#FFD700] font-semibold">Ship It</span> — ShipMe creates your{" "}
+              <span className="text-white">GitHub repo</span>, provisions{" "}
+              <span className="text-[#FFD700]">Supabase</span>, deploys to{" "}
+              <span className="text-[#00f5ff]">Netlify</span>, and hands you a live URL.
             </p>
 
             {/* Project Idea Input */}
@@ -375,7 +404,8 @@ export default function LandingPage() {
                     </p>
                   </div>
 
-                  {!launchResult ? (
+                  {/* Show form OR timeline, never both */}
+                  {!showTimeline ? (
                     <>
                       {/* Repository Name */}
                       <div className="mb-4">
@@ -400,7 +430,7 @@ export default function LandingPage() {
                         <h4 className="text-sm font-bold text-white mb-3 font-['Syne']">Connect Your Accounts</h4>
                         <p className="text-xs text-slate-400 mb-3">
                           {isLoggedIn
-                            ? "Connect these services so Claude Code can provision your infrastructure automatically."
+                            ? "ShipMe will provision infrastructure using your connected accounts."
                             : "Sign in with GitHub first, then connect Supabase and Netlify."}
                         </p>
                         <div className="space-y-2">
@@ -486,55 +516,138 @@ export default function LandingPage() {
                         )}
                       </div>
 
-                      {/* Launch Button */}
+                      {/* Ship It Button */}
                       <button
-                        onClick={handleLaunchCodespace}
-                        disabled={isLaunching || !allConnected}
+                        onClick={handleShipIt}
+                        disabled={!allConnected}
                         className="w-full px-8 py-4 bg-gradient-to-r from-[#00f5ff] to-[#FFD700] rounded-xl font-semibold text-slate-950 hover:shadow-xl hover:shadow-[#00f5ff]/30 transition-all flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isLaunching ? (
-                          <>
-                            <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                            Launching Codespace...
-                          </>
-                        ) : !allConnected ? (
+                        {!allConnected ? (
                           <>
                             <Shield className="w-5 h-5" />
-                            Connect All Accounts to Launch
+                            Connect All Accounts to Ship
                           </>
                         ) : (
                           <>
-                            <Github className="w-5 h-5" />
-                            Launch Development Environment
+                            <Rocket className="w-5 h-5" />
+                            Ship It
                             <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                           </>
                         )}
                       </button>
                       <p className="text-xs text-slate-500 mt-2 text-center">
                         {allConnected
-                          ? "Opens GitHub Codespace with Claude Code ready to provision your infrastructure"
+                          ? "Creates repo, provisions Supabase, deploys to Netlify — all automatically"
                           : !isLoggedIn
                             ? "Sign in with GitHub first, then connect Supabase and Netlify"
-                            : "Connect all three services above to enable zero-touch provisioning"}
+                            : "Connect all three services above to ship your project"}
                       </p>
                     </>
                   ) : (
-                    <div className="mt-4 p-4 bg-[#00f5ff]/10 border border-[#00f5ff]/30 rounded-xl">
-                      <p className="text-white font-semibold mb-2">Codespace Launched!</p>
-                      <p className="text-sm text-slate-300 mb-3">Your development environment is ready</p>
-                      <a
-                        href={launchResult.codespace_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-6 py-3 bg-white text-slate-950 rounded-lg font-semibold hover:bg-slate-100 transition-all"
-                      >
-                        <Terminal className="w-5 h-5" />
-                        Open Codespace
-                        <ArrowRight className="w-4 h-4" />
-                      </a>
-                      <p className="text-xs text-slate-400 mt-2">
-                        Repository: <a href={launchResult.repo_url} target="_blank" rel="noopener noreferrer" className="text-[#00f5ff] hover:underline">{launchResult.repo_url}</a>
-                      </p>
+                    /* Progress Timeline */
+                    <div className="mt-2 space-y-4">
+                      <h4 className="text-sm font-bold text-white font-['Syne']">
+                        {provisionResult ? "Your app is live!" : provisionError ? "Provisioning failed" : "Shipping your project..."}
+                      </h4>
+
+                      {/* Step indicators */}
+                      <div className="space-y-3">
+                        {provisionSteps.map((step) => (
+                          <div key={step.id} className="flex items-start gap-3">
+                            <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center mt-0.5">
+                              {step.status === 'done' && (
+                                <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                </div>
+                              )}
+                              {step.status === 'in_progress' && (
+                                <div className="w-4 h-4 border-2 border-[#00f5ff] border-t-transparent rounded-full animate-spin" />
+                              )}
+                              {step.status === 'failed' && (
+                                <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center">
+                                  <X className="w-3 h-3 text-red-400" />
+                                </div>
+                              )}
+                              {step.status === 'pending' && (
+                                <div className="w-4 h-4 rounded-full border border-white/20" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-medium ${
+                                step.status === 'done' ? 'text-emerald-400' :
+                                step.status === 'failed' ? 'text-red-400' :
+                                step.status === 'in_progress' ? 'text-white' :
+                                'text-slate-500'
+                              }`}>
+                                {step.label}
+                              </p>
+                              {step.detail && (
+                                <p className="text-xs text-slate-400 mt-0.5 truncate">{step.detail}</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Error state */}
+                      {provisionError && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                          <p className="text-sm text-red-300 leading-relaxed">{provisionError.message}</p>
+                          <button
+                            onClick={handleRetry}
+                            className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Try again
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Success state */}
+                      {provisionResult && (
+                        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-3">
+                          <div className="space-y-2">
+                            <a
+                              href={provisionResult.netlify_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-sm text-[#00f5ff] hover:text-[#00f5ff]/80 transition-colors font-medium"
+                            >
+                              <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                              <span className="truncate">{provisionResult.netlify_url}</span>
+                            </a>
+                            <a
+                              href={provisionResult.supabase_dashboard_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-sm text-emerald-400 hover:text-emerald-300 transition-colors"
+                            >
+                              <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                              <span>Supabase Dashboard</span>
+                            </a>
+                            <a
+                              href={provisionResult.github_repo_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-sm text-slate-300 hover:text-white transition-colors"
+                            >
+                              <Github className="w-4 h-4 flex-shrink-0" />
+                              <span className="truncate">{provisionResult.github_repo_url}</span>
+                            </a>
+                          </div>
+
+                          {codespaceUrl && (
+                            <a
+                              href={codespaceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-white/10 text-white rounded-lg hover:bg-white/15 transition-colors text-sm border border-white/20"
+                            >
+                              <Terminal className="w-4 h-4" />
+                              Open in Codespace (optional dev environment)
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -549,28 +662,28 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl font-bold text-center mb-12 font-['Syne']">
             <span className="bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
-              Why ShipMe v2.0
+              Why ShipMe v3.0
             </span>
           </h2>
 
           <div className="grid md:grid-cols-3 gap-8">
             {[
               {
-                icon: Terminal,
-                title: "Watch AI Work",
-                description: "See Claude Code provision infrastructure in real-time. Learn by watching every step in your terminal.",
+                icon: Zap,
+                title: "Instant Infrastructure",
+                description: "ShipMe provisions GitHub, Supabase, and Netlify automatically — no terminal, no config files, no manual steps.",
                 color: "cyan",
               },
               {
                 icon: Shield,
-                title: "Zero Credential Exposure",
-                description: "Credentials stored in-memory only, encrypted, auto-destroyed. Never touch your dashboard.",
+                title: "Errors, Not Black Boxes",
+                description: "Every step is visible in the UI. If something fails you see exactly why and can fix it immediately.",
                 color: "lime",
               },
               {
-                icon: Zap,
-                title: "5-10 Minutes Total",
-                description: "From idea to fully deployed app with database, auth, and hosting. Not hours of manual setup.",
+                icon: Terminal,
+                title: "Dev-Ready Codespace",
+                description: "After shipping, open a Codespace with all credentials pre-loaded. Run npm run dev and start building.",
                 color: "pink",
               },
             ].map((feature, idx) => (
@@ -592,7 +705,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-white/5 py-8 px-6 mt-20">
         <div className="max-w-6xl mx-auto text-center text-sm text-slate-500">
-          <p>&copy; 2026 ShipMe v2.0 &bull; Built by Ayan Putatunda</p>
+          <p>&copy; 2026 ShipMe v3.0 &bull; Built by Ayan Putatunda</p>
         </div>
       </footer>
     </div>

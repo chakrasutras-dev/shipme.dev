@@ -329,3 +329,40 @@ ALTER TABLE provisioning_tokens
 -- (e.g. Supabase organization_id captured during OAuth)
 ALTER TABLE user_oauth_tokens
   ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+
+-- ============================================================================
+-- Phase 3: Server-Side Provisioning Jobs
+-- Tracks provisioning state across frontend polling calls
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS provisioning_jobs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'started',
+  -- 'started' | 'supabase_creating' | 'supabase_ready' | 'netlify_done' | 'done' | 'failed'
+  project_name TEXT NOT NULL,
+  description TEXT,
+  github_repo_url TEXT,
+  github_repo_id BIGINT,
+  supabase_project_id TEXT,
+  supabase_url TEXT,
+  supabase_anon_key TEXT,
+  supabase_service_role_key TEXT,
+  netlify_site_id TEXT,
+  netlify_url TEXT,
+  error_step TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE provisioning_jobs ENABLE ROW LEVEL SECURITY;
+
+-- Users can read their own jobs (for polling from the frontend)
+CREATE POLICY "Users can read own provisioning jobs"
+  ON provisioning_jobs FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE TRIGGER update_provisioning_jobs_updated_at
+  BEFORE UPDATE ON provisioning_jobs
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
