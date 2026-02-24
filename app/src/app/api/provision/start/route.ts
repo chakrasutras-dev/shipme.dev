@@ -111,11 +111,25 @@ export async function POST(request: Request) {
     })
     repo = data
   } catch (err: any) {
-    console.error('[Provision/Start] GitHub repo creation failed:', err.message)
-    return NextResponse.json({
-      error: `GitHub repo creation failed: ${err.message}`,
-      step: 'github'
-    }, { status: 500 })
+    // If repo already exists (prior failed attempt), reuse it instead of failing
+    if (err.status === 422 || err.message?.includes('Name already exists')) {
+      try {
+        const { data: existing } = await octokit.repos.get({ owner: githubUser.login, repo: projectName })
+        repo = existing
+        console.log('[Provision/Start] Reusing existing repo:', existing.html_url)
+      } catch {
+        return NextResponse.json({
+          error: `Repository "${projectName}" already exists but could not be accessed. Try a different name.`,
+          step: 'github'
+        }, { status: 400 })
+      }
+    } else {
+      console.error('[Provision/Start] GitHub repo creation failed:', err.message)
+      return NextResponse.json({
+        error: `GitHub repo creation failed: ${err.message}`,
+        step: 'github'
+      }, { status: 500 })
+    }
   }
 
   // Wait briefly for repo to be ready before injecting project.json

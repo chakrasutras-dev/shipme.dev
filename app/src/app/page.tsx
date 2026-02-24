@@ -242,12 +242,23 @@ export default function LandingPage() {
   };
 
   // Connect Supabase or Netlify
-  const connectProvider = (provider: "supabase" | "netlify") => {
+  // autoShipAfter=true: saves a flag so Ship It fires automatically after OAuth redirect
+  const connectProvider = (provider: "supabase" | "netlify", autoShipAfter = false) => {
     localStorage.setItem("pendingProjectIdea", projectIdea);
     if (recommendedStack) localStorage.setItem("pendingRecommendedStack", JSON.stringify(recommendedStack));
     if (repoName) localStorage.setItem("pendingRepoName", repoName);
+    if (autoShipAfter) localStorage.setItem("pendingAutoShip", "true");
     window.location.href = `/api/oauth/start?provider=${provider}`;
   };
+
+  // Auto-trigger Ship It if pendingAutoShip is set after an OAuth reconnect
+  useEffect(() => {
+    const pending = localStorage.getItem("pendingAutoShip");
+    if (pending === "true" && allConnected && recommendedStack && !isProvisioning && !showTimeline) {
+      localStorage.removeItem("pendingAutoShip");
+      handleShipIt();
+    }
+  }, [allConnected, recommendedStack, isProvisioning]);
 
   const handleShipIt = async () => {
     if (!allConnected) return;
@@ -645,18 +656,18 @@ export default function LandingPage() {
                             {/* Supabase token error — show direct reconnect button */}
                             {(provisionError.step === 'supabase_org' || provisionError.step === 'supabase_auth') && (
                               <button
-                                onClick={() => connectProvider("supabase")}
+                                onClick={() => connectProvider("supabase", true)}
                                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors border border-emerald-500/30"
                               >
-                                <RefreshCw className="w-3 h-3" /> Reconnect Supabase
+                                <RefreshCw className="w-3 h-3" /> Reconnect Supabase &amp; Retry
                               </button>
                             )}
                             {provisionError.step === 'netlify_auth' && (
                               <button
-                                onClick={() => connectProvider("netlify")}
+                                onClick={() => connectProvider("netlify", true)}
                                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-[#00C7B7]/20 text-[#00C7B7] rounded-lg hover:bg-[#00C7B7]/30 transition-colors border border-[#00C7B7]/30"
                               >
-                                <RefreshCw className="w-3 h-3" /> Reconnect Netlify
+                                <RefreshCw className="w-3 h-3" /> Reconnect Netlify &amp; Retry
                               </button>
                             )}
                             <button
