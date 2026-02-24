@@ -641,12 +641,31 @@ export default function LandingPage() {
                       {provisionError && (
                         <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
                           <p className="text-sm text-red-300 leading-relaxed">{provisionError.message}</p>
-                          <button
-                            onClick={handleRetry}
-                            className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
-                          >
-                            <RefreshCw className="w-3 h-3" /> Try again
-                          </button>
+                          <div className="mt-2 flex flex-wrap items-center gap-3">
+                            {/* Supabase token error — show direct reconnect button */}
+                            {(provisionError.step === 'supabase_org' || provisionError.step === 'supabase_auth') && (
+                              <button
+                                onClick={() => connectProvider("supabase")}
+                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors border border-emerald-500/30"
+                              >
+                                <RefreshCw className="w-3 h-3" /> Reconnect Supabase
+                              </button>
+                            )}
+                            {provisionError.step === 'netlify_auth' && (
+                              <button
+                                onClick={() => connectProvider("netlify")}
+                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-[#00C7B7]/20 text-[#00C7B7] rounded-lg hover:bg-[#00C7B7]/30 transition-colors border border-[#00C7B7]/30"
+                              >
+                                <RefreshCw className="w-3 h-3" /> Reconnect Netlify
+                              </button>
+                            )}
+                            <button
+                              onClick={handleRetry}
+                              className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+                            >
+                              <RefreshCw className="w-3 h-3" /> Try again
+                            </button>
+                          </div>
                         </div>
                       )}
 
