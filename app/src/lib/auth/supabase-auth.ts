@@ -43,6 +43,18 @@ export async function getSession() {
   return null
 }
 
+export async function signInWithGoogle() {
+  const supabase = createClient()
+  const redirectUrl = `${window.location.origin}/auth/callback`
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: redirectUrl }
+  })
+  if (error) return { data, error }
+  if (data?.url) window.location.href = data.url
+  return { data, error }
+}
+
 export async function signOut() {
   const supabase = createClient()
   await supabase.auth.signOut()

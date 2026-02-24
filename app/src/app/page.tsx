@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { ArrowRight, Github, Zap, Shield, Terminal, Rocket, Sparkles, Check, ExternalLink, X, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { signInWithGitHub, getSession } from "@/lib/auth/supabase-auth";
 
 type ConnectedAccounts = {
@@ -272,7 +273,16 @@ export default function LandingPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        updateStep('github', { status: 'failed', detail: data.error });
+        // Map the API step to the visual step
+        const failedVisualStep =
+          data.step === 'supabase_org' || data.step === 'supabase_auth' || data.step === 'supabase_create' ? 'supabase' :
+          data.step === 'netlify_auth' ? 'netlify' : 'github';
+        updateStep('github', { status: failedVisualStep === 'github' ? 'failed' : 'done' });
+        if (failedVisualStep !== 'github') {
+          updateStep(failedVisualStep, { status: 'failed', detail: data.error });
+        } else {
+          updateStep('github', { status: 'failed', detail: data.error });
+        }
         setProvisionError({ step: data.step || 'github', message: data.error });
         setIsProvisioning(false);
         return;
@@ -324,6 +334,14 @@ export default function LandingPage() {
               >
                 <Github className="w-5 h-5" />
               </a>
+              {!isLoggedIn && (
+                <Link
+                  href="/login"
+                  className="text-xs text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-white/10 hover:border-white/20"
+                >
+                  Sign in
+                </Link>
+              )}
               {isLoggedIn && (
                 <button
                   onClick={async () => {

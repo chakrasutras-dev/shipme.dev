@@ -134,7 +134,7 @@ export async function POST(request: Request) {
 
   if (!supabaseOrgIdResolved) {
     return NextResponse.json({
-      error: 'No Supabase organization found. Please create one at supabase.com/dashboard first.',
+      error: 'No Supabase organization found. Your Supabase token may have expired — disconnect and reconnect Supabase, then try again.',
       step: 'supabase_org'
     }, { status: 400 })
   }
